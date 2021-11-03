@@ -20,3 +20,17 @@ def _try_register_r2r_vln_dataset():
         class R2RDatasetImportError(Dataset):
             def __init__(self, *args, **kwargs):
                 raise r2r_vln_import_error
+
+
+def _try_register_rxr_vln_dataset():
+    try:
+        from habitat.datasets.vln.rxr_vln_dataset import (  # noqa: F401 isort:skip
+            RxRVLNCEDatasetV1,
+        )
+    except ImportError as e:
+        rxr_vln_import_error = e
+
+        @registry.register_dataset(name="RxRVLN-v1")
+        class RxRDatasetImportError(Dataset):
+            def __init__(self, *args, **kwargs):
+                raise rxr_vln_import_error
