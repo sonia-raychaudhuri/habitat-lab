@@ -40,9 +40,9 @@ MAP_TARGET_POINT_INDICATOR = 6
 MAP_SHORTEST_PATH_COLOR = 7
 MAP_VIEW_POINT_INDICATOR = 8
 MAP_TARGET_BOUNDING_BOX = 9
-TOP_DOWN_MAP_COLORS = np.full((256, 3), 150, dtype=np.uint8)
+TOP_DOWN_MAP_COLORS = np.full((5556, 3), 150, dtype=np.uint8)
 TOP_DOWN_MAP_COLORS[10:] = cv2.applyColorMap(
-    np.arange(246, dtype=np.uint8), cv2.COLORMAP_JET
+    np.arange(5546, dtype=np.uint8), cv2.COLORMAP_JET
 ).squeeze(1)[:, ::-1]
 TOP_DOWN_MAP_COLORS[MAP_INVALID_POINT] = [255, 255, 255]  # White
 TOP_DOWN_MAP_COLORS[MAP_VALID_POINT] = [150, 150, 150]  # Light Grey

@@ -12,13 +12,21 @@ from gym import spaces
 from habitat.config import Config
 from habitat.core.logging import logger
 from habitat.core.registry import registry
-from habitat.core.simulator import AgentState, Sensor, SensorTypes
+from habitat.core.simulator import AgentState, Sensor, SensorTypes, Simulator
 from habitat.core.utils import not_none_validator
 from habitat.tasks.nav.nav import (
     NavigationEpisode,
     NavigationGoal,
     NavigationTask,
 )
+from habitat.utils.geometry_utils import (
+    quaternion_from_coeff,
+    quaternion_rotate_vector,
+)
+from habitat.tasks.utils import cartesian_to_polar
+from habitat.utils.visualizations import maps, fog_of_war
+# import habitat_baselines.common.map_utils
+import quaternion
 
 try:
     from habitat.datasets.object_nav.object_nav_dataset import (
@@ -176,6 +184,488 @@ class ObjectGoalSensor(Sensor):
                 "Wrong GOAL_SPEC specified for ObjectGoalSensor."
             )
 
+@registry.register_sensor(name="GPSSensor")
+class EpisodicGPSSensor(Sensor):
+    r"""The agents current location in the coordinate frame defined by the episode,
+    i.e. the axis it faces along and the origin is defined by its state at t=0
+    Args:
+        sim: reference to the simulator for calculating task observations.
+        config: Contains the DIMENSIONALITY field for the number of dimensions to express the agents position
+    Attributes:
+        _dimensionality: number of dimensions used to specify the agents position
+    """
+    cls_uuid: str = "episodic_gps"
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+
+        self._dimensionality = getattr(config, "DIMENSIONALITY", 2)
+        assert self._dimensionality in [2, 3]
+        super().__init__(config=config)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any):
+        return self.cls_uuid
+
+    def _get_sensor_type(self, *args: Any, **kwargs: Any):
+        return SensorTypes.POSITION
+
+    def _get_observation_space(self, *args: Any, **kwargs: Any):
+        sensor_shape = (self._dimensionality,)
+        return spaces.Box(
+            low=np.finfo(np.float32).min,
+            high=np.finfo(np.float32).max,
+            shape=sensor_shape,
+            dtype=np.float32,
+        )
+
+    def get_observation(
+        self, *args: Any, observations, episode, **kwargs: Any
+    ):
+        agent_state = self._sim.get_agent_state()
+
+        origin = np.array(episode.start_position, dtype=np.float32)
+        rotation_world_start = quaternion_from_coeff(episode.start_rotation)
+
+        agent_position = agent_state.position
+
+        agent_position = quaternion_rotate_vector(
+            rotation_world_start.inverse(), agent_position - origin
+        )
+        if self._dimensionality == 2:
+            return np.array(
+                [-agent_position[2], agent_position[0]], dtype=np.float32
+            )
+        else:
+            return agent_position.astype(np.float32)
+        
+@registry.register_sensor(name="CompassSensor")
+class EpisodicCompassSensor(Sensor):
+    r"""The agents heading in the coordinate frame defined by the epiosde,
+    theta=0 is defined by the agents state at t=0
+    """
+    cls_uuid: str = "episodic_compass"
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        super().__init__(config=config)
+
+    def _get_sensor_type(self, *args: Any, **kwargs: Any):
+        return SensorTypes.HEADING
+    
+    def _get_uuid(self, *args: Any, **kwargs: Any):
+        return self.cls_uuid
+    
+    def _get_observation_space(self, *args: Any, **kwargs: Any):
+        return spaces.Box(low=-np.pi, high=np.pi, shape=(1,), dtype=np.float32)
+    
+    def _quat_to_xy_heading(self, quat):
+        direction_vector = np.array([0, 0, -1])
+
+        heading_vector = quaternion_rotate_vector(quat, direction_vector)
+
+        phi = cartesian_to_polar(-heading_vector[2], heading_vector[0])[1]
+        return np.array([phi], dtype=np.float32)
+
+    def get_observation(
+        self, *args: Any, observations, episode, **kwargs: Any
+    ):
+        agent_state = self._sim.get_agent_state()
+        rotation_world_agent = agent_state.rotation
+        rotation_world_start = quaternion_from_coeff(episode.start_rotation)
+
+        return self._quat_to_xy_heading(
+            rotation_world_agent.inverse() * rotation_world_start
+        )
+
+@registry.register_sensor(name="ObjectMapSensor")
+class ObjectMapSensor(Sensor):
+    r"""
+        Map with Goals and Distractors marked
+    Args:
+        sim: reference to the simulator for calculating task observations.
+        config: sensor config
+    Attributes:
+        
+    """
+    cls_uuid: str = "object_map"
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        
+        self.mapCache = {}
+        self.cache_max_size = config.cache_max_size
+        self.map_size = config.map_size
+        self.meters_per_pixel = config.meters_per_pixel
+        self.num_samples = config.num_samples
+        self.nav_threshold = config.nav_threshold
+        self.map_channels = config.MAP_CHANNELS
+        self.draw_border = config.draw_border   #false
+        self.with_sampling = config.with_sampling # true
+        self.mask_map = config.mask_map
+        self.visibility_dist = config.VISIBILITY_DIST
+        self.fov = config.FOV
+        self.object_ind_offset = config.object_ind_offset
+        self.channel_num = 1
+        self.object_padding = config.object_padding
+        self.object_to_datset_mapping = {'chair': 0, 'bed': 1, 'plant': 2, 'toilet': 3, 'tv_monitor': 4, 'sofa': 5}
+        
+        super().__init__(config=config)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any):
+        return self.cls_uuid
+
+    def _get_sensor_type(self, *args: Any, **kwargs: Any):
+        return SensorTypes.SEMANTIC
+
+    def _get_observation_space(self, *args: Any, **kwargs: Any):
+        return spaces.Box(
+            low=0,
+            high=10,
+            shape=(self.map_size, self.map_size, self.map_channels),
+            dtype=np.int,
+        )
+        
+    def get_polar_angle(self):
+        agent_state = self._sim.get_agent_state()
+        # quaternion is in x, y, z, w format
+        ref_rotation = agent_state.rotation
+
+        heading_vector = quaternion_rotate_vector(
+            ref_rotation.inverse(), np.array([0, 0, -1])
+        )
+
+        phi = cartesian_to_polar(-heading_vector[2], heading_vector[0])[1]
+        z_neg_z_flip = np.pi
+        return np.array(phi) + z_neg_z_flip
+        
+    def get_topdown_map(self,
+        pathfinder,
+        height: float,
+        map_resolution: int = 1024,
+        draw_border: bool = True,
+        meters_per_pixel: Optional[float] = None,
+        with_sampling: Optional[bool] = True,
+        num_samples: Optional[float] = 50,
+        nav_threshold: Optional[float] = 0.3,
+    ) -> np.ndarray:
+        r"""Return a top-down occupancy map for a sim. Note, this only returns valid
+        values for whatever floor the agent is currently on.
+
+        :param pathfinder: A habitat-sim pathfinder instances to get the map from
+        :param height: The height in the environment to make the topdown map
+        :param map_resolution: Length of the longest side of the map.  Used to calculate :p:`meters_per_pixel`
+        :param draw_border: Whether or not to draw a border
+        :param meters_per_pixel: Overrides map_resolution an
+
+        :return: Image containing 0 if occupied, 1 if unoccupied, and 2 if border (if
+            the flag is set).
+        """
+
+        if meters_per_pixel is None:
+            meters_per_pixel = maps.calculate_meters_per_pixel(
+                map_resolution, pathfinder=pathfinder
+            )
+
+        if with_sampling:
+            top_down_map = pathfinder.get_topdown_view_with_sampling(
+                meters_per_pixel=meters_per_pixel, height=height,
+                num_samples=num_samples, nav_threshold=nav_threshold
+            ).astype(np.uint8)
+        else:
+            top_down_map = pathfinder.get_topdown_view(
+                meters_per_pixel=meters_per_pixel, height=height
+            ).astype(np.uint8)
+
+        # Draw border if necessary
+        if draw_border:
+            maps._outline_border(top_down_map)
+
+        return np.ascontiguousarray(top_down_map)
+
+
+    def get_topdown_map_from_sim(self,
+        sim: "HabitatSim",
+        map_resolution: int = 1024,
+        draw_border: bool = True,
+        meters_per_pixel: Optional[float] = None,
+        agent_id: int = 0,
+        with_sampling: Optional[bool] = True,
+        num_samples: Optional[float] = 50,
+        nav_threshold: Optional[float] = 0.3,
+    ) -> np.ndarray:
+        r"""Wrapper around :py:`get_topdown_map` that retrieves that pathfinder and heigh from the current simulator
+
+        :param sim: Simulator instance.
+        :param agent_id: The agent ID
+        """
+        return self.get_topdown_map(
+            sim.pathfinder,
+            sim.get_agent(agent_id).state.position[1],
+            map_resolution,
+            draw_border,
+            meters_per_pixel,
+            with_sampling,
+            num_samples,
+            nav_threshold
+        )
+
+    def print_scene_recur(self, scene, limit_output=10):
+        print(f"House has {len(scene.levels)} levels, {len(scene.regions)} regions and {len(scene.objects)} objects")
+        print(f"House center:{scene.aabb.center} dims:{scene.aabb.sizes}")
+
+        # count = 0
+        # for level in scene.levels:
+        #     print(
+        #         f"Level id:{level.id}, center:{level.aabb.center},"
+        #         f" dims:{level.aabb.sizes}"
+        #     )
+        #     count += 1
+        #     if count >= limit_output:
+        #         break
+
+        count = 0
+        for obj in scene.objects:
+            print(
+                f"Object id:{obj.id}, category:{obj.category.name()},"
+                f" center:{obj.aabb.center}, dims:{obj.aabb.sizes}"
+            )
+            count += 1
+            # if count >= limit_output:
+            #     break
+                    
+        # count = 0
+        # for region in scene.regions:
+        #     print(
+        #         f"Region id:{region.id}, category:{region.category.name()},"
+        #         f" center:{region.aabb.center}, dims:{region.aabb.sizes}"
+        #     )
+        #     count += 1
+        #     if count >= limit_output:
+        #         break
+                    
+    def match_sensor_cat(self, scene, observations, episode):
+        
+        sem_observed = np.unique(observations['semantic'])
+        scene_object_ids = [o.id for o in scene.objects]
+        
+        if set(sem_observed).issubset(set(scene_object_ids)):
+            for s in sem_observed:
+                print(scene.objects[scene.objects==s])
+            
+    def get_observation(
+        self, *args: Any, observations, episode, **kwargs: Any
+    ):
+        # debug
+        scene = self._sim.semantic_scene
+        # self.print_scene_recur(scene)
+        self.match_sensor_cat(scene, observations, episode)
+        #
+        
+        agent_state = self._sim.get_agent_state()
+        agent_position = agent_state.position
+        agent_vertical_pos = str(round(agent_position[1], 2))
+        
+        if (episode.scene_id in self.mapCache and 
+                agent_vertical_pos in self.mapCache[episode.scene_id]):
+            top_down_map = self.mapCache[episode.scene_id][agent_vertical_pos].copy()
+            
+        else:
+            top_down_map = self.get_topdown_map_from_sim(
+                self._sim,
+                draw_border=self.draw_border,
+                meters_per_pixel=self.meters_per_pixel,
+                with_sampling=self.with_sampling,
+                num_samples=self.num_samples,
+                nav_threshold=self.nav_threshold
+            )
+            if episode.scene_id not in self.mapCache:
+                if len(self.mapCache) > self.cache_max_size:
+                    # Reset cache when cache size exceeds max size
+                    self.mapCache = {}
+                self.mapCache[episode.scene_id] = {}
+            self.mapCache[episode.scene_id][agent_vertical_pos] = top_down_map.copy()
+            
+        object_map = np.zeros((top_down_map.shape[0], top_down_map.shape[1], self.map_channels))
+        object_map[:top_down_map.shape[0], :top_down_map.shape[1], 0] = top_down_map
+
+        # Get agent location on map
+        agent_loc = maps.to_grid(
+                    agent_position[2],
+                    agent_position[0],
+                    top_down_map.shape[0:2],
+                    sim=self._sim,
+                )
+
+        # Mark the agent location
+        object_map[max(0, agent_loc[0]-self.object_padding):min(top_down_map.shape[0], agent_loc[0]+self.object_padding),
+                    max(0, agent_loc[1]-self.object_padding):min(top_down_map.shape[1], agent_loc[1]+self.object_padding),
+                    self.channel_num+1] = 10 #len(self.object_to_datset_mapping) + self.object_ind_offset
+        
+
+        # Mask the map
+        if self.mask_map:
+            _fog_of_war_mask = np.zeros_like(top_down_map)
+            _fog_of_war_mask = fog_of_war.reveal_fog_of_war(
+                top_down_map,
+                _fog_of_war_mask,
+                np.array(agent_loc),
+                self.get_polar_angle(),
+                fov=self.fov,
+                max_line_len=self.visibility_dist
+                / self.meters_per_pixel,
+            )
+            object_map[:, :, self.channel_num] += 1
+            object_map[:, :, self.channel_num] *= _fog_of_war_mask # Hide unobserved areas
+
+        # Adding goal information on the map
+        for i in range(len(episode.goals)):
+            loc0 = episode.goals[i].position[0]
+            loc2 = episode.goals[i].position[2]
+            grid_loc = maps.to_grid(
+                loc2,
+                loc0,
+                top_down_map.shape[0:2],
+                sim=self._sim,
+            )
+            object_map[grid_loc[0]-self.object_padding:grid_loc[0]+self.object_padding, 
+                        grid_loc[1]-self.object_padding:grid_loc[1]+self.object_padding,
+                        self.channel_num] = (
+                                self.object_to_datset_mapping[episode.goals[i].object_category]
+                                + self.object_ind_offset
+                            )
+
+        # Hide the  out-of-view objects
+        if self.mask_map:
+            object_map[:, :, self.channel_num] *= _fog_of_war_mask   
+            
+        final_object_map = np.zeros((self.map_size, self.map_size, self.map_channels))
+        final_object_map[:top_down_map.shape[0], :top_down_map.shape[1], :] = object_map
+
+        return final_object_map
+
+@registry.register_sensor(name="ObjectNavSemanticSensor")
+class ObjectNavSemanticSensor(Sensor):
+    r"""
+        Map with ground-truth object nav goal category
+    Args:
+        sim: reference to the simulator for calculating task observations.
+        config: sensor config
+    Attributes:
+        
+    """
+    cls_uuid: str = "semantic_labels"
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self.height = 256
+        self.width = 256
+        self.object_to_datset_mapping = {'chair': 1, 'bed': 2, 'plant': 3, 
+                                         'toilet': 4, 'tv_monitor': 5, 'sofa': 6,
+                                         'tv': 5, 'monitor': 5, 'couch': 6}
+        
+        super().__init__(config=config)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any):
+        return self.cls_uuid
+
+    def _get_sensor_type(self, *args: Any, **kwargs: Any):
+        return SensorTypes.SEMANTIC
+
+    def _get_observation_space(self, *args: Any, **kwargs: Any):
+        return spaces.Box(
+            low=np.iinfo(np.uint32).min,
+            high=np.iinfo(np.uint32).max,
+            shape=(self.height, self.width, 1),
+            dtype=np.int32,
+        )
+            
+    def get_observation(
+        self, *args: Any, observations, episode, **kwargs: Any
+    ):
+        scene = self._sim.semantic_scene
+        instance_id_to_label_id = {int(obj.id.split("_")[-1]): obj.category.index() for obj in scene.objects}
+        instance_id_to_label_names = {int(obj.id.split("_")[-1]): obj.category.name() for obj in scene.objects}
+        
+        semantic_obs = observations['semantic']
+        
+        # instance id to MP3D category id
+        # semantic_obs_transformed = np.array(
+        #                             [instance_id_to_label_id[s] for s in semantic_obs.reshape(-1)]
+        #                         ).reshape(semantic_obs.shape)
+        
+        # instance id to MP3D category to ObjNav category id
+        semantic_transformed = np.array(
+                                    [self.object_to_datset_mapping[instance_id_to_label_names[s]]
+                                        if instance_id_to_label_names[s] in self.object_to_datset_mapping
+                                        else 0
+                                     for s in semantic_obs.reshape(-1)]
+                                ).reshape(semantic_obs.shape)
+        
+
+        return semantic_transformed
+
+@registry.register_sensor(name="PositionSensor")
+class AgentPositionSensor(Sensor):
+    def __init__(self, sim, config, **kwargs: Any):
+        self._sim = sim
+        super().__init__(config=config)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any):
+        return "agent_position"
+
+    def _get_sensor_type(self, *args: Any, **kwargs: Any):
+        return SensorTypes.POSITION
+
+    # Defines the size and range of the observations of the sensor
+    def _get_observation_space(self, *args: Any, **kwargs: Any):
+        return spaces.Box(
+            low=np.finfo(np.float32).min,
+            high=np.finfo(np.float32).max,
+            shape=(3,),
+            dtype=np.float32,
+        )
+
+    def get_observation(
+        self, observations, *args: Any, episode, **kwargs: Any
+    ):
+        return self._sim.get_agent_state().position
+
+@registry.register_sensor(name="RotationSensor")
+class RotationSensor(Sensor):
+    r"""The agent's world rotation as quaternion
+        -   similar to CompassSensor
+    """
+    cls_uuid: str = "agent_rotation"
+    def __init__(self, sim, config, **kwargs: Any):
+        self._sim = sim
+        super().__init__(config=config)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any):
+        return self.cls_uuid
+    
+    def _get_sensor_type(self, *args: Any, **kwargs: Any):
+        return SensorTypes.HEADING
+
+    # Defines the size and range of the observations of the sensor
+    def _get_observation_space(self, *args: Any, **kwargs: Any):
+        return spaces.Box(
+            low=np.finfo(np.float32).min,
+            high=np.finfo(np.float32).max,
+            shape=(34,),
+            dtype=np.float32,
+        )
+
+    def get_observation(
+        self, *args: Any, observations, episode, **kwargs: Any
+    ):
+        agent_state = self._sim.get_agent_state()
+        rotation_world_agent = agent_state.rotation
+
+        return quaternion.as_float_array(rotation_world_agent)
 
 @registry.register_task(name="ObjectNav-v1")
 class ObjectNavigationTask(NavigationTask):

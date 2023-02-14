@@ -26,6 +26,7 @@ from typing import (
 import attr
 import numpy as np
 import torch
+from gym import spaces
 from gym.spaces import Box
 from PIL import Image
 from torch import Size, Tensor
@@ -42,6 +43,19 @@ from habitat_baselines.common.tensorboard_utils import TensorboardWriter
 
 cv2 = try_cv2_import()
 
+def get_num_actions(action_space) -> int:
+    queue = [action_space]
+    num_actions = 0
+    while len(queue) != 0:
+        v = queue.pop()
+        if isinstance(v, spaces.Dict):
+            queue.extend(v.spaces.values())
+        elif isinstance(v, spaces.Box):
+            num_actions += v.shape[0]
+        else:
+            num_actions += 1
+
+    return num_actions
 
 class CustomFixedCategorical(torch.distributions.Categorical):  # type: ignore
     def sample(
@@ -332,6 +346,7 @@ def generate_video(
     tb_writer: TensorboardWriter,
     fps: int = 10,
     verbose: bool = True,
+    keys_to_include_in_name: Optional[List[str]] = None,
 ) -> None:
     r"""Generate video according to specified information.
 
@@ -352,15 +367,31 @@ def generate_video(
         return
 
     metric_strs = []
-    for k, v in metrics.items():
-        metric_strs.append(f"{k}={v:.2f}")
+    if (
+        keys_to_include_in_name is not None
+        and len(keys_to_include_in_name) > 0
+    ):
+        use_metrics_k = [
+            k
+            for k in metrics
+            if any(
+                to_include_k in k for to_include_k in keys_to_include_in_name
+            )
+        ]
+    else:
+        use_metrics_k = list(metrics.keys())
+
+    for k in use_metrics_k:
+        metric_strs.append(f"{k}={metrics[k]:.2f}")
 
     video_name = f"episode={episode_id}-ckpt={checkpoint_idx}-" + "-".join(
         metric_strs
     )
     if "disk" in video_option:
         assert video_dir is not None
-        images_to_video(images, video_dir, video_name, verbose=verbose)
+        images_to_video(
+            images, video_dir, video_name, fps=fps, verbose=verbose
+        )
     if "tensorboard" in video_option:
         tb_writer.add_video_from_np_images(
             f"episode{episode_id}", checkpoint_idx, images, fps=fps

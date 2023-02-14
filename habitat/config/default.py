@@ -133,6 +133,51 @@ _C.TASK.PROXIMITY_SENSOR = CN()
 _C.TASK.PROXIMITY_SENSOR.TYPE = "ProximitySensor"
 _C.TASK.PROXIMITY_SENSOR.MAX_DETECTION_RADIUS = 2.0
 # -----------------------------------------------------------------------------
+# Object Map SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.OBJECT_MAP_SENSOR = CN()
+_C.TASK.OBJECT_MAP_SENSOR.TYPE = "ObjectMapSensor"
+_C.TASK.OBJECT_MAP_SENSOR.meters_per_pixel = 0.3
+_C.TASK.OBJECT_MAP_SENSOR.num_samples = 50
+_C.TASK.OBJECT_MAP_SENSOR.nav_threshold = 0.3
+_C.TASK.OBJECT_MAP_SENSOR.MAP_CHANNELS = 3
+_C.TASK.OBJECT_MAP_SENSOR.draw_border = False
+_C.TASK.OBJECT_MAP_SENSOR.with_sampling = True
+_C.TASK.OBJECT_MAP_SENSOR.mask_map = False
+_C.TASK.OBJECT_MAP_SENSOR.cache_max_size = 2
+_C.TASK.OBJECT_MAP_SENSOR.map_size = 100
+_C.TASK.OBJECT_MAP_SENSOR.mask_map = False
+_C.TASK.OBJECT_MAP_SENSOR.VISIBILITY_DIST = 5.0
+_C.TASK.OBJECT_MAP_SENSOR.FOV = 80
+_C.TASK.OBJECT_MAP_SENSOR.object_padding = 2
+_C.TASK.OBJECT_MAP_SENSOR.object_ind_offset = 2
+# -----------------------------------------------------------------------------
+# Oracle Map Size SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.ORACLE_MAP_SIZE_SENSOR = CN()
+_C.TASK.ORACLE_MAP_SIZE_SENSOR.TYPE = "OracleMapSizeSensor"
+_C.TASK.ORACLE_MAP_SIZE_SENSOR.meters_per_pixel = _C.TASK.OBJECT_MAP_SENSOR.meters_per_pixel
+_C.TASK.ORACLE_MAP_SIZE_SENSOR.num_samples = _C.TASK.OBJECT_MAP_SENSOR.num_samples
+_C.TASK.ORACLE_MAP_SIZE_SENSOR.nav_threshold = _C.TASK.OBJECT_MAP_SENSOR.nav_threshold
+_C.TASK.ORACLE_MAP_SIZE_SENSOR.draw_border = _C.TASK.OBJECT_MAP_SENSOR.draw_border
+_C.TASK.ORACLE_MAP_SIZE_SENSOR.with_sampling = _C.TASK.OBJECT_MAP_SENSOR.with_sampling
+_C.TASK.ORACLE_MAP_SIZE_SENSOR.cache_max_size = 2
+# -----------------------------------------------------------------------------
+# Object Map SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.OBJECT_NAV_SEMANTIC_SENSOR = CN()
+_C.TASK.OBJECT_NAV_SEMANTIC_SENSOR.TYPE = "ObjectNavSemanticSensor"
+# -----------------------------------------------------------------------------
+# POSITION SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.POSITION_SENSOR = CN()
+_C.TASK.POSITION_SENSOR.TYPE = "PositionSensor"
+# -----------------------------------------------------------------------------
+# AGENT ROTATION SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.ROTATION_SENSOR = CN()
+_C.TASK.ROTATION_SENSOR.TYPE = "RotationSensor"
+# -----------------------------------------------------------------------------
 # SUCCESS MEASUREMENT
 # -----------------------------------------------------------------------------
 _C.TASK.SUCCESS = CN()
@@ -148,6 +193,11 @@ _C.TASK.SPL.TYPE = "SPL"
 # -----------------------------------------------------------------------------
 _C.TASK.SOFT_SPL = CN()
 _C.TASK.SOFT_SPL.TYPE = "SoftSPL"
+# -----------------------------------------------------------------------------
+# # EPISODE_LENGTH MEASUREMENT
+# -----------------------------------------------------------------------------
+_C.TASK.EPISODE_LENGTH = CN()
+_C.TASK.EPISODE_LENGTH.TYPE = "EpisodeLength"
 # -----------------------------------------------------------------------------
 # TopDownMap MEASUREMENT
 # -----------------------------------------------------------------------------
@@ -166,7 +216,7 @@ _C.TASK.TOP_DOWN_MAP.FOG_OF_WAR.FOV = 90
 _C.TASK.TOP_DOWN_MAP.DRAW_VIEW_POINTS = True
 _C.TASK.TOP_DOWN_MAP.DRAW_GOAL_POSITIONS = True
 # Axes aligned bounding boxes
-_C.TASK.TOP_DOWN_MAP.DRAW_GOAL_AABBS = True
+_C.TASK.TOP_DOWN_MAP.DRAW_GOAL_AABBS = False
 # -----------------------------------------------------------------------------
 # COLLISIONS MEASUREMENT
 # -----------------------------------------------------------------------------
@@ -433,6 +483,17 @@ _C.DATASET.DATA_PATH = (
     "data/datasets/pointnav/habitat-test-scenes/v1/{split}/{split}.json.gz"
 )
 
+# -----------------------------------------------------------------------------
+# GYM
+# -----------------------------------------------------------------------------
+_C.GYM = CN()
+_C.GYM.AUTO_NAME = ""
+_C.GYM.CLASS_NAME = "RearrangeRLEnv"
+_C.GYM.OBS_KEYS = None
+_C.GYM.ACTION_KEYS = None
+_C.GYM.ACHIEVED_GOAL_KEYS = []
+_C.GYM.DESIRED_GOAL_KEYS = []
+_C.GYM.FIX_INFO_DICT = True
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
 # DEPRECATED KEYS

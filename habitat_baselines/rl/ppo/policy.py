@@ -58,6 +58,14 @@ class Policy(nn.Module, metaclass=abc.ABCMeta):
 
         self.critic = CriticHead(self.net.output_size)
 
+    @property
+    def should_load_agent_state(self):
+        return True
+    
+    @property
+    def num_recurrent_layers(self) -> int:
+        return self.net.num_recurrent_layers
+
     def forward(self, *x):
         raise NotImplementedError
 
@@ -253,3 +261,32 @@ class PointNavBaselineNet(Net):
         )
 
         return x_out, rnn_hidden_states
+
+class HierNetPolicy(Policy):
+    def act(
+        self,
+        observations,
+        rnn_hidden_states,
+        prev_actions,
+        masks,
+        goal_observations,
+        deterministic=False,
+    ):
+        features, rnn_hidden_states = self.net(
+            observations, rnn_hidden_states, prev_actions, masks, goal_observations
+        )
+        distribution = self.action_distribution(features)
+        value = self.critic(features)
+
+        if deterministic:
+            if self.action_distribution_type == "categorical":
+                action = distribution.mode()
+            elif self.action_distribution_type == "gaussian":
+                action = distribution.mean
+        else:
+            action = distribution.sample()
+
+        action_log_probs = distribution.log_probs(action)
+
+        return value, action, action_log_probs, rnn_hidden_states
+    

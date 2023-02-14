@@ -11,6 +11,7 @@ in habitat. Customized environments should be registered using
 """
 
 from typing import Optional, Type
+import random
 
 import numpy as np
 
@@ -105,7 +106,28 @@ class NavRLEnv(habitat.RLEnv):
         return observations
 
     def step(self, *args, **kwargs):
-        self._previous_action = kwargs["action"]
+        is_goal = True
+        is_found_called = False
+        action = kwargs["action"]
+        
+        if "action_args" in kwargs and "is_goal" in kwargs["action_args"]:
+            is_goal = kwargs["action_args"]["is_goal"]
+        
+        # Support simpler interface as well
+        if isinstance(action, (str, int, np.integer)):
+            is_found_called = bool(action == 0)
+            # if action == 0:
+            #     print('here')
+            action = {"action": action}
+        else:
+            is_found_called = bool(action["action"] == 0)
+            
+        if is_found_called and bool(is_goal == 0):
+            #action = {"action": 1}  # Forward
+            action = {"action": random.choice([1,2,3])}
+            
+        self._previous_action = action
+        kwargs["action"] = action
         return super().step(*args, **kwargs)
 
     def get_reward_range(self):

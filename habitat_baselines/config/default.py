@@ -29,10 +29,14 @@ _C.TORCH_GPU_ID = 0
 _C.VIDEO_OPTION = ["disk", "tensorboard"]
 _C.TENSORBOARD_DIR = "tb"
 _C.VIDEO_DIR = "video_dir"
+_C.VIDEO_FPS = 10
+_C.VIDEO_RENDER_TOP_DOWN = True
+_C.VIDEO_RENDER_ALL_INFO = False
 _C.TEST_EPISODE_COUNT = -1
 _C.EVAL_CKPT_PATH_DIR = "data/checkpoints"  # path to ckpt or path to ckpts dir
-_C.NUM_ENVIRONMENTS = 16
-_C.NUM_PROCESSES = -1  # depricated
+_C.NUM_ENVIRONMENTS = 1
+_C.NUM_PROCESSES = _C.NUM_ENVIRONMENTS # supporting deprecated NUM_PROCESSES
+_C.NUM_SCENES = -1  # if -1, pick all scenes, else pick NUM_SCENES scenes
 _C.SENSORS = ["RGB_SENSOR", "DEPTH_SENSOR"]
 _C.CHECKPOINT_FOLDER = "data/checkpoints"
 _C.NUM_UPDATES = 10000
@@ -44,6 +48,7 @@ _C.LOG_INTERVAL = 10
 _C.LOG_FILE = "train.log"
 _C.FORCE_BLIND_POLICY = False
 _C.VERBOSE = True
+_C.EVAL_KEYS_TO_INCLUDE_IN_NAME = []
 # For our use case, the CPU side things are mainly memory copies
 # and nothing of substantive compute. PyTorch has been making
 # more and more memory copies parallel, but that just ends up
@@ -60,6 +65,7 @@ _C.EVAL = CN()
 # The split to evaluate on
 _C.EVAL.SPLIT = "val"
 _C.EVAL.USE_CKPT_CONFIG = True
+_C.EVAL.SHOULD_LOAD_CKPT = True
 # -----------------------------------------------------------------------------
 # REINFORCEMENT LEARNING (RL) ENVIRONMENT CONFIG
 # -----------------------------------------------------------------------------
@@ -121,6 +127,7 @@ _C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE = CN()
 _C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE.HEIGHT = 256
 _C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE.WIDTH = 256
 _C.RL.POLICY.OBS_TRANSFORMS.EQ2CUBE.SENSOR_UUIDS = list()
+_C.RL.GYM_OBS_KEYS = []
 # -----------------------------------------------------------------------------
 # PROXIMAL POLICY OPTIMIZATION (PPO)
 # -----------------------------------------------------------------------------
