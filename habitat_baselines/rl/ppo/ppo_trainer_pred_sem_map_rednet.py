@@ -19,6 +19,7 @@ from numpy import float32, ndarray, uint8
 from torch import Tensor
 import torch
 from torch import nn
+from torchvision import ops
 import tqdm
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -29,11 +30,13 @@ from habitat_baselines.common.env_utils import construct_envs
 from habitat_baselines.common.environments import get_env_class
 from habitat_baselines.common.tensorboard_utils import (
     TensorboardWriter,
+    # get_writer
 )
 from habitat_baselines.utils.common import (
     batch_obs,
     generate_video,
     linear_decay,
+    # action_array_to_dict,
     # get_num_actions,
     # is_continuous_action_space,
     ObservationBatchingCache,
@@ -77,14 +80,46 @@ from habitat.utils.geometry_utils import (
 from habitat_baselines.rl.models.projection import Projection, RotateTensor, get_grid
 import habitat_baselines.common.depth_utils as du
 import habitat_baselines.common.rotation_utils as ru
-#from habitat.utils.visualizations import fog_of_war
-#import habitat_baselines.common.fog_of_war as fog_of_war
-#from habitat_baselines.common.object_detector_cyl import ObjectDetector
-import skimage
 
-@baseline_registry.register_trainer(name="semmapon")
-class SemMapOnTrainer(BaseRLTrainer):
-    r"""Trainer class for predicted semantic map
+from habitat_baselines.common.semantic_segmentation.rednet import RedNet
+# from habitat_baselines.common.semantic_segmentation.train import load_ckpt
+
+def convert_weights_cuda_cpu(weights, device):
+    names = list(weights.keys())
+    is_module = names[0].split('.')[0] == 'module'
+    if device == 'cuda' and not is_module:
+        new_weights = {'module.'+k:v for k,v in weights.items()}
+    elif device == 'cpu' and is_module:
+        new_weights = {'.'.join(k.split('.')[1:]):v for k,v in weights.items()}
+    else:
+        new_weights = weights
+    return new_weights
+
+def load_ckpt(model, optimizer, model_file, device):
+    if os.path.isfile(model_file):
+        print("=> loading checkpoint '{}'".format(model_file))
+        if device.type == 'cuda':
+            checkpoint = torch.load(model_file)
+        else:
+            checkpoint = torch.load(model_file, map_location=lambda storage, loc: storage)
+        
+        model_state = convert_weights_cuda_cpu(checkpoint['model_state'], 'cpu')
+        model.load_state_dict(model_state)
+        if optimizer:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        print("=> loaded checkpoint '{}' (epoch {})"
+              .format(model_file, checkpoint['epoch']))
+        
+        step = checkpoint['global_step'] if 'global_step' in checkpoint else 0
+        epoch = checkpoint['epoch'] if 'epoch' in checkpoint else 0
+        return step, epoch, model
+    else:
+        print("=> no checkpoint found at '{}'".format(model_file))
+        os._exit(0)
+
+@baseline_registry.register_trainer(name="predrednet")
+class PredSemMapRedNetOnTrainer(BaseRLTrainer):
+    r"""Trainer class for predicted semantic map with RedNet
     """
     supported_tasks = ["Nav-v0"]
 
@@ -283,10 +318,10 @@ class SemMapOnTrainer(BaseRLTrainer):
             self.policy_action_space = action_space
             # if is_continuous_action_space(action_space):
             #     # Assume ALL actions are NOT discrete
-            #     action_shape = 1 #(get_num_actions(action_space),)
+            #     action_shape = (get_num_actions(action_space),)
             #     discrete_actions = False
             # else:
-            # For discrete pointnav
+            #     # For discrete pointnav
             action_shape = None
             discrete_actions = True
 
@@ -912,6 +947,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         is_goal: Tensor,
         grid_map: Tensor,
         object_maps: Tensor,
+        #pred_ious: Tensor,
     ) -> Tuple[
         VectorEnv,
         Tensor,
@@ -925,6 +961,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         Tensor,
         Tensor,
         Tensor,
+        #Tensor,
     ]:
         # pausing self.envs with no new episode
         if len(envs_to_pause) > 0:
@@ -945,6 +982,7 @@ class SemMapOnTrainer(BaseRLTrainer):
             is_goal = is_goal[state_index]
             grid_map = grid_map[state_index]
             object_maps = object_maps[state_index]
+            #pred_ious = pred_ious[state_index]
 
             for k, v in batch.items():
                 batch[k] = v[state_index]
@@ -963,9 +1001,10 @@ class SemMapOnTrainer(BaseRLTrainer):
             global_object_map,
             is_goal,
             grid_map,
-            object_maps
+            object_maps,
+            #pred_ious
         )
-        
+
     def _eval_checkpoint(
         self,
         checkpoint_path: str,
@@ -1034,7 +1073,7 @@ class SemMapOnTrainer(BaseRLTrainer):
             self.policy_action_space = action_space
             # if is_continuous_action_space(action_space):
             #     # Assume NONE of the actions are discrete
-            #     action_shape = 1 #(get_num_actions(action_space),)
+            #     action_shape = (get_num_actions(action_space),)
             #     discrete_actions = False
             # else:
             # For discrete pointnav
@@ -1129,6 +1168,7 @@ class SemMapOnTrainer(BaseRLTrainer):
             dtype=torch.bool,
         )
         stubborn_goal_queues = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
+        pred_ious = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
         
         ##Depth
         self.camera = du.get_camera_matrix(
@@ -1150,7 +1190,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         #   [elevation+slice_range_below, elevation+slice_range_above]
         self.slice_range_below = -1 # Should be 0 or negative
         self.slice_range_above = 10.5 # Should be 0 or positive
-        self.z_bins = [0.05, 3.5]
+        self.z_bins = [0.01, 5.5]
         
         ##
         
@@ -1178,14 +1218,16 @@ class SemMapOnTrainer(BaseRLTrainer):
         oracle_map_size[:, 1, :] = torch.tensor([self.config.RL.SEM_MAP_POLICY.coordinate_min, 
                     self.config.RL.SEM_MAP_POLICY.coordinate_min], device=self.device)
         # 
-        
-        #_detector = ObjectDetector()
-        # self.selem = skimage.morphology.disk(1)
+
+        self.model_rednet = RedNet(config.IL.RedNet)
+        self.model_rednet = self.model_rednet.to(self.device)
+        _, _, self.model_rednet = load_ckpt(self.model_rednet, None, self.config.IL.RedNet.last_ckpt, self.device)
+        self.model_rednet.eval()
         
         stats_episodes: Dict[
             Any, Any
         ] = {}  # dict of dicts that stores stats per episode
-        
+
         # Saving all predictions
         results_dir = os.path.join(self.config.RESULTS_DIR, self.config.EVAL.SPLIT)
         os.makedirs(results_dir, exist_ok=True)
@@ -1228,17 +1270,12 @@ class SemMapOnTrainer(BaseRLTrainer):
             next_goal_category = batch['objectgoal']
             
             # 1) Get map with all objects
-            self.object_maps, agent_locs = self.build_map(batch, self.object_maps, self.grid_map)
+            self.object_maps, agent_locs, semantic, _pred_ious = self.build_map(batch, self.object_maps, self.grid_map)
             self.gt_maps = batch['object_map'][:,:,:,0]
             self.gt_maps[self.gt_maps > 0] = 1.
                 
             for i in range(self.envs.num_envs):
-                # Dilate object positions on map
-                # obj_map = skimage.morphology.binary_dilation(
-                #     self.object_maps[i, :, :, 1].cpu().numpy(),
-                #     self.selem)
-                # self.object_maps[i, :, :, 1] = torch.tensor(obj_map)
-                
+                pred_ious[i].append(_pred_ious[i].item())
                 # visited for coverage
                 self.visited[
                     i,
@@ -1391,21 +1428,6 @@ class SemMapOnTrainer(BaseRLTrainer):
                 )
 
                 prev_actions.copy_(actions)  # type: ignore
-                
-            # Check if the agent is sufficiently close to the goal - then Stop
-            for i in range(self.envs.num_envs):
-                if is_goal[i] == 1:
-                    # get agent location on the map
-                    agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
-                    if len(agent_grid_loc) > 0:
-                        agent_grid_loc = agent_grid_loc[0]
-                    else:
-                        agent_grid_loc = [0, 0]
-                    if ((np.linalg.norm(
-                        goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
-                            ord=2) * self.map_resolution) < 1.0):
-                        actions[i] = 0
-            
             # NB: Move actions to CPU.  If CUDA tensors are
             # sent in to env.step(), that will create CUDA contexts
             # in the subprocesses.
@@ -1461,6 +1483,9 @@ class SemMapOnTrainer(BaseRLTrainer):
                         "covered_area_ratio": coverage_ratio.item()
                     })
                     
+                    infos[i].update(
+                        {"pred_iou": np.array(pred_ious[i]).mean()}
+                    )
                     episode_stats.update(
                         self._extract_scalars_from_info(infos[i])
                     )
@@ -1476,7 +1501,8 @@ class SemMapOnTrainer(BaseRLTrainer):
                     if len(self.config.VIDEO_OPTION) > 0:
                         frame = observations_to_image(
                                 observation=batch[i], info=infos[i], action=actions[i].cpu().numpy(),
-                                object_map=self.object_maps[i], 
+                                object_map=self.object_maps[i],
+                                predicted_semantic=semantic[i], 
                                 #semantic_projections=(self.map > 0), #projection[i], 
                                 #global_object_map=global_object_map[i], 
                                 #agent_view=agent_view[i],
@@ -1562,6 +1588,7 @@ class SemMapOnTrainer(BaseRLTrainer):
                         for k,v in episode_stats.items():
                             row_item.append(v)
                         _csv_writer.writerow(row_item)
+                    pred_ious[i] = []
 
                 # episode continues
                 else:
@@ -1569,6 +1596,7 @@ class SemMapOnTrainer(BaseRLTrainer):
                         frame = observations_to_image(
                                 observation=observations[i], info=infos[i], action=actions[i].cpu().numpy(),
                                 object_map=self.object_maps[i], 
+                                predicted_semantic=semantic[i],
                                 #semantic_projections=(self.map > 0), #projection[i], 
                                 #global_object_map=global_object_map[i], 
                                 #agent_view=agent_view[i],
@@ -1626,7 +1654,8 @@ class SemMapOnTrainer(BaseRLTrainer):
                 global_object_map,
                 is_goal,
                 self.grid_map,
-                self.object_maps
+                self.object_maps,
+                #pred_ious
             ) = self._pause_envs(
                 envs_to_pause,
                 self.envs,
@@ -1640,7 +1669,8 @@ class SemMapOnTrainer(BaseRLTrainer):
                 global_object_map,
                 is_goal,
                 self.grid_map,
-                self.object_maps
+                self.object_maps,
+                #pred_ious
             )
 
         num_episodes = len(stats_episodes)
@@ -1680,20 +1710,42 @@ class SemMapOnTrainer(BaseRLTrainer):
         depth[depth == 0] = np.NaN
         #depth[depth > 10] = np.NaN
 
-        semantic = observations['semantic_labels'].cpu().numpy()
+        #gt_semantic = observations['semantic_labels'].squeeze(-1).cpu().numpy()
         theta = observations['episodic_compass'].cpu().numpy()
         location = observations["episodic_gps"].cpu().numpy()
+        #semantic = np.zeros_like(depth)
         
-        # if 5 in semantic:
-        #     print('here')
-        #res = _detector.predict(observations['rgb'])
+        output, _ = self.model_rednet(observations["rgb"].permute(0,3,1,2).type(torch.float), 
+                                    observations["depth"].permute(0,3,1,2))
+        semantic = torch.max(output, 1)[1]
+        semantic = semantic.unsqueeze(-1).cpu().numpy()
+        if len(np.unique(semantic)) > 1:
+            print('Unique values: ', np.unique(semantic).join(",")) 
+        
+        pred_ious = torch.zeros(self.config.NUM_ENVIRONMENTS)
+        # for i, res in enumerate(results):
+        #     if len(res['boxes'])> 0:
+        #         gt_bbox = []
+        #         for j, b in enumerate(res['boxes']):
+        #             b = np.round(b).astype(int)
+        #             semantic[i, b[1]:b[3], b[0]:b[2]] = res["labels"][j] + 1  # object semantic labels start at 1
+                    
+        #             # get GT bbox
+        #             # if (res["labels"][j] + 1) in gt_semantic[i]:
+        #             #     gt_locs = (gt_semantic[i] * (gt_semantic[i] == (res["labels"][j] + 1))).nonzero()
+        #             #     gt_bbox.append(torch.tensor([np.min(gt_locs[1]), np.min(gt_locs[0]), np.max(gt_locs[1]), np.max(gt_locs[0])]))
+                
+        #         # if len(gt_bbox) > 0:
+        #         #     pred_ious[i] = ops.box_iou(torch.stack(gt_bbox), torch.tensor(res['boxes'])).mean()
+                    
+        # semantic = semantic[..., np.newaxis]
         
         coords = self._unproject_to_world(depth, location, theta)
         grid_map = self._add_to_map(coords, semantic, grid_map)
         _agent_locs = self.to_grid(location)
         object_maps[:, :, :, :2] = torch.tensor(grid_map)
         
-        return object_maps, _agent_locs
+        return object_maps, _agent_locs, semantic, pred_ious
     
     def _unproject_to_world(self, depth, location, theta):
         point_cloud = du.get_point_cloud_from_z(depth, self.camera)
@@ -1720,6 +1772,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         grid_map[:, :, :, 0] = map
         
         grid_map[:, :, :, 1] = np.maximum(grid_map[:, :, :, 1], sem_map_counts[:, :, :, 1])
+        #grid_map[:, :, :, 1] = sem_map_counts[:, :, :, 1]
 
         return grid_map
         

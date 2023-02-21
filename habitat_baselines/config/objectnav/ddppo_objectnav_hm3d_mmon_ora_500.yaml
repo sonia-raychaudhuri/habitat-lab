@@ -5,13 +5,13 @@ SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
 VIDEO_OPTION: []
 VIDEO_RENDER_ALL_INFO: True
-TENSORBOARD_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/tb"
-VIDEO_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/video_dir"
-RESULTS_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/results"
-TEST_EPISODE_COUNT: 1000
+TENSORBOARD_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd1/val/tb"
+VIDEO_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd1/val/video_dir"
+RESULTS_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd1/val/results"
+TEST_EPISODE_COUNT: -1
 EVAL_CKPT_PATH_DIR: "data/pretrained_models/hm3d_ddppo_pointnav_baselines_v1/hm3d-depth/ckpt.60.pth"
-NUM_ENVIRONMENTS: 1
-CHECKPOINT_FOLDER: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/new_checkpoints"
+NUM_ENVIRONMENTS: 16
+CHECKPOINT_FOLDER: "experiments/pointnav/hm3d-depth/objnav/s500_sd1/val/new_checkpoints"
 TRAINER_NAME: "semmapon"
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR", "SEMANTIC_SENSOR"]
 NUM_UPDATES: 270000
@@ -50,7 +50,7 @@ RL:
     name: "PointNavResNetPolicy"
     EXPLORATION_STRATEGY: "random"  # can be one of ["random", "stubborn"]
     EXPLORE_RADIUS: 50
-    MAX_STEPS_BEFORE_GOAL_SELECTION: 25
+    MAX_STEPS_BEFORE_GOAL_SELECTION: 50
     global_map_size: 250
     USE_LOCAL_MAP_FOR_STUBBORN: True
     local_map_size: 15

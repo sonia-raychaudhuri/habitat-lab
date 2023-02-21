@@ -21,6 +21,37 @@ except ImportError:
 OBJNAV_CATEGORY = {'chair': 1, 'bed': 2, 'plant': 3, 'toilet': 4, 'tv_monitor': 5, 'sofa': 6}
 OBJNAV_CATEGORY_MAP = dict((v,k) for k,v in OBJNAV_CATEGORY.items())
 
+objnav12_objnav6cat = {"0":"0",
+                    "1":"0",
+                    "2":"0",
+                    "3":"2",
+                    "4":"0",
+                    "5":"0",
+                    "6":"6",
+                    "7":"0",
+                    "8":"1",
+                    "9":"0",
+                    "10":"3",
+                    "11":"0",
+                    "12":"0"
+                   }
+objnav12_objnav6cat = {int(k): int(v) for k,v in objnav12_objnav6cat.items()}
+
+OBJNAV_CATEGORY_LABEL_COLORS = np.array([[0,0,0],
+                 [106, 137, 204],   # shelving
+                 [230, 126, 34],    # chest of drawers
+                 [7, 153, 146],   # bed
+                 [248, 194, 145],   # cushion
+                 [76, 209, 55],     # fireplace
+                 [255, 168, 1],   # sofa
+                 [184, 233, 148],   # table
+                 [39, 174, 96],    # chair
+                 [229, 80, 57],  # cabinet
+                 [30, 55, 153],  # plant
+                 [24, 220, 255], #[56, 173, 169],    # counter
+                 [234, 32, 39],  #sink
+], dtype=np.uint8)
+
 # Multion Objects
 MULTION_CYL_OBJECT_CATEGORY = {'cylinder_red':1, 'cylinder_green':2, 'cylinder_blue':3, 'cylinder_yellow':4, 
                             'cylinder_white':5, 'cylinder_pink':6, 'cylinder_black':7, 'cylinder_cyan':8}

@@ -422,12 +422,12 @@ def observations_to_image(observation: Dict, projected_features: np.ndarray=None
         
     if predicted_semantic is not None:
         observation_size = predicted_semantic.shape[0]
+        predicted_semantic = predicted_semantic.squeeze(-1)
         if not isinstance(predicted_semantic, np.ndarray):
             predicted_semantic = predicted_semantic.cpu().numpy()
 
-        predicted_semantic = (predicted_semantic + 1).squeeze().astype(np.uint8)
-
-        predicted_semantic = multion_maps.OBJECT_MAP_COLORS[predicted_semantic]
+        predicted_semantic = predicted_semantic.astype(np.uint8)
+        predicted_semantic = multion_maps.OBJNAV_CATEGORY_LABEL_COLORS[predicted_semantic]
         # scale map to align with rgb view
         old_h, old_w, _ = predicted_semantic.shape
         _height = observation_size

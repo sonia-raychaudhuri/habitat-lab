@@ -1,18 +1,18 @@
-BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_hm3d.yaml"
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_hm3d2.yaml"
 CMD_TRAILING_OPTS: ["TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS", "50000"]
 ENV_NAME: "NavRLEnv"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
-VIDEO_OPTION: []
+VIDEO_OPTION: ["disk"]
 VIDEO_RENDER_ALL_INFO: True
-TENSORBOARD_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/tb"
-VIDEO_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/video_dir"
-RESULTS_DIR: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/results"
-TEST_EPISODE_COUNT: 1000
+TENSORBOARD_DIR: "experiments/pointnav/hm3d-depth/objnav/predsem/rednet/tb"
+VIDEO_DIR: "experiments/pointnav/hm3d-depth/objnav/predsem/rednet/video_dir"
+RESULTS_DIR: "experiments/pointnav/hm3d-depth/objnav/predsem/rednet/results"
+TEST_EPISODE_COUNT: 20
 EVAL_CKPT_PATH_DIR: "data/pretrained_models/hm3d_ddppo_pointnav_baselines_v1/hm3d-depth/ckpt.60.pth"
-NUM_ENVIRONMENTS: 1
-CHECKPOINT_FOLDER: "experiments/pointnav/hm3d-depth/objnav/s500_sd0.1/val/new_checkpoints"
-TRAINER_NAME: "semmapon"
+NUM_ENVIRONMENTS: 5
+CHECKPOINT_FOLDER: "experiments/pointnav/hm3d-depth/objnav/predsem/rednet/new_checkpoints"
+TRAINER_NAME: "predrednet"
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR", "SEMANTIC_SENSOR"]
 NUM_UPDATES: 270000
 LOG_INTERVAL: 10
@@ -25,6 +25,26 @@ EVAL:
   SPLIT: "val"
   SHOULD_LOAD_CKPT: True
   USE_CKPT_CONFIG: False
+
+IL:
+  RedNet:
+    arch: "rednet"
+    resnet_pretrained: True
+    n_classes: 13
+    epochs: 50
+    batch_size: 20
+    workers: 4
+    lr: 3e-4
+    lr_decay_rate: 0.8
+    lr_epoch_per_decay: 100
+    weight_decay: 1e-4
+    momentum: 0.9
+    freeze_encoder: False
+    training_data: ""
+    last_ckpt: "data/pretrained_models/sem_seg/rednet_mp3d_best_model.pkl"
+    start_epoch: 5
+    save_epoch_freq: 5
+    print_freq: 200
 
 RL:
   SUCCESS_REWARD: 2.5
@@ -50,7 +70,7 @@ RL:
     name: "PointNavResNetPolicy"
     EXPLORATION_STRATEGY: "random"  # can be one of ["random", "stubborn"]
     EXPLORE_RADIUS: 50
-    MAX_STEPS_BEFORE_GOAL_SELECTION: 25
+    MAX_STEPS_BEFORE_GOAL_SELECTION: 50
     global_map_size: 250
     USE_LOCAL_MAP_FOR_STUBBORN: True
     local_map_size: 15

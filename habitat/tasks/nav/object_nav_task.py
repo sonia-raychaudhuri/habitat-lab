@@ -477,7 +477,7 @@ class ObjectMapSensor(Sensor):
                 self._sim,
                 draw_border=self.draw_border,
                 meters_per_pixel=self.meters_per_pixel,
-                with_sampling=self.with_sampling,
+                with_sampling=False, #self.with_sampling,
                 num_samples=self.num_samples,
                 nav_threshold=self.nav_threshold
             )

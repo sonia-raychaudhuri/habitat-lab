@@ -450,8 +450,8 @@ class HabitatSim(habitat_sim.Simulator, Simulator):
 
         self.pathfinder.find_path(path)
 
-        if episode is not None:
-            episode._shortest_path_cache = path
+        # if episode is not None:
+        #     episode._shortest_path_cache = path
 
         return path.geodesic_distance
 

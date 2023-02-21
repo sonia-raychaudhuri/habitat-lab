@@ -546,13 +546,28 @@ class Success(Measure):
         distance_to_target = task.measurements.measures[
             DistanceToGoal.cls_uuid
         ].get_metric()
-
+        
+        # if episode.episode_id == '91':
+        #     # print('In 91; ')
+        #     ep_l = task.measurements.measures["episode_length"].get_metric()
+        #     if ep_l is not None and ep_l >= 326:
+        #         print('almost there.')
+                
         if (
             hasattr(task, "is_stop_called")
             and task.is_stop_called  # type: ignore
-            and distance_to_target < self._config.SUCCESS_DISTANCE
         ):
-            self._metric = 1.0
+            current_position = self._sim.get_agent_state().position
+            d_to_goal_point = self._sim.geodesic_distance(
+                    current_position,
+                    [goal.position for goal in episode.goals],
+                    episode,
+                )
+            if (distance_to_target <= self._config.SUCCESS_DISTANCE or
+                d_to_goal_point <= 1.0):
+                self._metric = 1.0
+            else:
+                self._metric = 0.0
         else:
             self._metric = 0.0
 
@@ -1016,34 +1031,43 @@ class DistanceToGoal(Measure):
         self.update_metric(episode=episode, *args, **kwargs)  # type: ignore
 
     def update_metric(
-        self, episode: NavigationEpisode, *args: Any, **kwargs: Any
+        self, episode: NavigationEpisode, task: EmbodiedTask, *args: Any, **kwargs: Any
     ):
         current_position = self._sim.get_agent_state().position
 
-        if self._previous_position is None or not np.allclose(
-            self._previous_position, current_position, atol=1e-4
-        ):
-            if self._config.DISTANCE_TO == "POINT":
-                distance_to_target = self._sim.geodesic_distance(
-                    current_position,
-                    [goal.position for goal in episode.goals],
-                    episode,
-                )
-            elif self._config.DISTANCE_TO == "VIEW_POINTS":
-                distance_to_target = self._sim.geodesic_distance(
-                    current_position, self._episode_view_points, episode
-                )
-            else:
-                logger.error(
-                    f"Non valid DISTANCE_TO parameter was provided: {self._config.DISTANCE_TO}"
-                )
+        # if episode.episode_id == '91':
+        #     # print('In 91; ')
+        #     ep_l = task.measurements.measures["episode_length"].get_metric()
+        #     if ep_l is not None and ep_l >= 326:
+        #         print('almost there.')
 
-            self._previous_position = (
-                current_position[0],
-                current_position[1],
-                current_position[2],
+        # if self._previous_position is None or not np.allclose(
+        #     self._previous_position, current_position, atol=1e-4
+        # ):
+        if self._config.DISTANCE_TO == "POINT":
+            distance_to_target = self._sim.geodesic_distance(
+                current_position,
+                [goal.position for goal in episode.goals],
+                episode,
             )
-            self._metric = distance_to_target
+        elif self._config.DISTANCE_TO == "VIEW_POINTS":
+            distance_to_target = self._sim.geodesic_distance(
+                current_position, self._episode_view_points, episode
+            )
+        else:
+            logger.error(
+                f"Non valid DISTANCE_TO parameter was provided: {self._config.DISTANCE_TO}"
+            )
+
+        if distance_to_target == float("inf"):
+            distance_to_target = 1.0
+            
+        self._previous_position = (
+            current_position[0],
+            current_position[1],
+            current_position[2],
+        )
+        self._metric = distance_to_target
 
 
 @registry.register_task_action
