@@ -8,6 +8,8 @@
 
 from typing import Any, List, Optional, Tuple
 
+import os
+import pandas as pd
 import attr
 import numpy as np
 import quaternion
@@ -37,8 +39,11 @@ from habitat.tasks.utils import cartesian_to_polar
 from habitat.utils.geometry_utils import (
     quaternion_from_coeff,
     quaternion_rotate_vector,
+    quaternion_from_two_vectors,
 )
 from habitat.utils.visualizations import fog_of_war, maps
+from habitat.tasks.rearrange.utils import get_aabb
+from habitat_sim.geo import OBB
 
 try:
     from habitat.sims.habitat_simulator.habitat_simulator import HabitatSim
@@ -1069,6 +1074,233 @@ class DistanceToGoal(Measure):
         )
         self._metric = distance_to_target
 
+@registry.register_measure
+class EucDistanceToGoal(Measure):
+    """The measure calculates the euclidean distance towards the goal."""
+
+    cls_uuid: str = "euc_distance_to_goal"
+
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        self._episode_view_points: Optional[
+            List[Tuple[float, float, float]]
+        ] = None
+
+        super().__init__(**kwargs)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def _euclidean_distance(self, position_a, position_b):
+        return np.linalg.norm(position_b - position_a, ord=2)
+    
+    def reset_metric(self, episode, *args: Any, **kwargs: Any):
+        self._metric = None
+        self.update_metric(episode=episode, *args, **kwargs)  # type: ignore
+
+    def update_metric(
+        self, episode: NavigationEpisode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        current_position = self._sim.get_agent_state().position
+
+        # if episode.episode_id == '91':
+        #     # print('In 91; ')
+        #     ep_l = task.measurements.measures["episode_length"].get_metric()
+        #     if ep_l is not None and ep_l >= 326:
+        #         print('almost there.')
+
+        distance_to_target = [self._euclidean_distance(
+            current_position, goal.position
+        ) for goal in episode.goals]
+
+        self._metric = min(distance_to_target)
+        
+@registry.register_measure
+class EucDistanceToGoalOBB(Measure):
+    """The measure calculates the euclidean distance to the goal OBB."""
+
+    cls_uuid: str = "euc_distance_to_goal_obb"
+
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        
+        self.scene_object_semantics = {}
+
+        super().__init__(**kwargs)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def _euclidean_distance(self, position_a, position_b):
+        return np.linalg.norm(position_b - position_a, ord=2)
+    
+    def reset_metric(self, episode, *args: Any, **kwargs: Any):
+        self._metric = None
+        
+        # Get object semantic obbs
+        scene_name = os.path.basename(episode.scene_id).split('.')[0]
+        scene_file = os.path.join('data','Semantic_CC_Reports',f"{scene_name}.basis_CC_report.csv")
+        self.scene_object_semantics[scene_name] = {}
+        
+        try:
+            df = pd.read_csv(scene_file, sep=",", header=0, index_col=False)
+            
+            object_ids = [g.object_id for g in episode.goals]
+            for o in object_ids:
+                center = np.array(np.fromstring(df[df["Obj IDX"]==o][" BBOX Center XYZ"].iloc[0], dtype=np.float32, sep=' '))
+                sizes = np.array(np.fromstring(df[df["Obj IDX"]==o][" BBOX Dims XYZ"].iloc[0], dtype=np.float32, sep=' '))
+                self.scene_object_semantics[scene_name][o] = {"center": center,
+                                                            "sizes": sizes}
+        except:
+            logger.info(f'---No file named {scene_file}')
+        
+        self.update_metric(episode=episode, *args, **kwargs)  # type: ignore
+
+    def update_metric(
+        self, episode: NavigationEpisode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        current_position = self._sim.get_agent_state().position
+        
+        scene_name = os.path.basename(episode.scene_id).split('.')[0]
+        
+        distance_to_bbox = []
+        if scene_name in self.scene_object_semantics:
+            for goal in episode.goals:
+                object_id = goal.object_id
+                if object_id in self.scene_object_semantics[scene_name]:
+                    center = self.scene_object_semantics[scene_name][object_id]["center"]
+                    sizes = self.scene_object_semantics[scene_name][object_id]["sizes"]
+                    object_obb = OBB(center, sizes, mn.Quaternion((0., 0., 0.)))
+                    distance_to_bbox.append(object_obb.distance(current_position))
+
+        self._metric = min(distance_to_bbox)
+
+@registry.register_measure
+class EucDistanceToViewPoints(Measure):
+    """The measure calculates the euclidean distance towards the goal."""
+
+    cls_uuid: str = "euc_distance_to_view_points"
+
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        self._episode_view_points: Optional[
+            List[Tuple[float, float, float]]
+        ] = None
+
+        super().__init__(**kwargs)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+
+    def _euclidean_distance(self, position_a, position_b):
+        return np.linalg.norm(position_b - position_a, ord=2)
+    
+    def reset_metric(self, episode, *args: Any, **kwargs: Any):
+        self._metric = None
+        self._episode_view_points = [
+                view_point.agent_state.position
+                for goal in episode.goals
+                for view_point in goal.view_points
+            ]
+        self.update_metric(episode=episode, *args, **kwargs)  # type: ignore
+
+    def update_metric(
+        self, episode: NavigationEpisode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        current_position = self._sim.get_agent_state().position
+
+        # if episode.episode_id == '91':
+        #     # print('In 91; ')
+        #     ep_l = task.measurements.measures["episode_length"].get_metric()
+        #     if ep_l is not None and ep_l >= 326:
+        #         print('almost there.')
+
+        distance_to_target = [self._euclidean_distance(
+            current_position, p
+        ) for p in self._episode_view_points]
+
+        self._metric = min(distance_to_target)
+
+@registry.register_measure
+class PixelCoverageOfGoal(Measure):
+    """The measure calculates the fraction of pixels of the goal visible from the agent location."""
+
+    cls_uuid: str = "pixel_cov_of_goal"
+
+    def __init__(
+        self, sim: Simulator, config: Config, *args: Any, **kwargs: Any
+    ):
+        self._sim = sim
+        self._config = config
+        self.visibility_threshold = config.VISIBILITY_THRESHOLD
+        
+        super().__init__(**kwargs)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return self.cls_uuid
+    
+    def reset_metric(self, episode, *args: Any, **kwargs: Any):
+        self._metric = None
+        self.update_metric(episode=episode, *args, **kwargs)  # type: ignore
+
+    def _euclidean_distance(self, position_a, position_b):
+        return np.linalg.norm(position_b - position_a, ord=2)
+    
+    def _direction_to_quaternion(self, direction_vector: np.array):
+        origin_vector = np.array([0, 0, -1])
+        output = quaternion_from_two_vectors(origin_vector, direction_vector)
+        output = output.normalized()
+        return output
+
+    def compute_pixel_coverage(self, instance_seg, object_id):
+        cand_mask = instance_seg == object_id
+        score = cand_mask.sum().astype(np.float64) / cand_mask.size
+        return score
+
+    def update_metric(
+        self, episode: NavigationEpisode, task: EmbodiedTask, *args: Any, **kwargs: Any
+    ):
+        cov = []
+        # agent = self._sim.get_agent(0)
+        
+        current_position = self._sim.get_agent_state().position
+        
+        # Find pixel coverage for all goals
+        for goal in episode.goals:
+
+            goal_direction = goal.position - current_position
+            goal_direction[1] = 0
+
+            q = self._direction_to_quaternion(goal_direction)
+            
+            object_id = goal.object_id
+
+            # # UPDATE: simpler sampling of observations from look_up and look_down
+            # self._sim.set_agent_state(current_position, q)
+            # for act in [
+            #     HabitatSimActions.LOOK_DOWN,
+            #     HabitatSimActions.LOOK_UP,
+            #     HabitatSimActions.LOOK_UP,
+            # ]:
+            #     agent.act(act)
+            #     # UPDATE: simpler sampling of observations from look_up and look_down
+            #     obs = self._sim.render("semantic")
+            #     cov += self.compute_pixel_coverage(obs, object_id)
+
+            # self._sim.set_agent_state(current_position, q)
+            obs = self._sim.render("semantic")
+            cov.append(self.compute_pixel_coverage(obs, object_id))
+        
+        self._metric = max(cov)
 
 @registry.register_task_action
 class MoveForwardAction(SimulatorTaskAction):

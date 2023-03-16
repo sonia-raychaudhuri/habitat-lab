@@ -264,9 +264,9 @@ def observations_to_image(observation: Dict, projected_features: np.ndarray=None
         # if config is not None and "is_mp3d" in config.RL.POLICY and config.RL.POLICY.is_mp3d:
         #     semantic_map = np.where(semantic_map >= 5000, semantic_map-5000+1, 0*semantic_map) # other semantic labels are not needed
 
-        semantic_map = (semantic_map + 1).astype(np.uint8)
+        semantic_map = semantic_map.astype(np.uint8)
 
-        semantic_map = multion_maps.OBJECT_MAP_COLORS[semantic_map]
+        semantic_map = multion_maps.OBJECT_MAP_COLORS[semantic_map+1]
         
         egocentric_view.append(semantic_map)
     
@@ -427,7 +427,7 @@ def observations_to_image(observation: Dict, projected_features: np.ndarray=None
             predicted_semantic = predicted_semantic.cpu().numpy()
 
         predicted_semantic = predicted_semantic.astype(np.uint8)
-        predicted_semantic = multion_maps.OBJNAV_CATEGORY_LABEL_COLORS[predicted_semantic]
+        predicted_semantic = multion_maps.OBJECT_MAP_COLORS[predicted_semantic+1]
         # scale map to align with rgb view
         old_h, old_w, _ = predicted_semantic.shape
         _height = observation_size

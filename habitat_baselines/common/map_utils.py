@@ -18,22 +18,26 @@ try:
 except ImportError:
     pass
 
-OBJNAV_CATEGORY = {'chair': 1, 'bed': 2, 'plant': 3, 'toilet': 4, 'tv_monitor': 5, 'sofa': 6}
+OBJNAV_CATEGORY = {'background':0, 'chair': 1, 'bed': 2, 'plant': 3, 'toilet': 4, 'tv_monitor': 5, 'sofa': 6}
 OBJNAV_CATEGORY_MAP = dict((v,k) for k,v in OBJNAV_CATEGORY.items())
+
+OBJNAV_CATEGORY_12_TO_6 = np.array([
+    0,0,0,2,6,0,6,1,1,5,3,0,4
+])
 
 objnav12_objnav6cat = {"0":"0",
                     "1":"0",
                     "2":"0",
                     "3":"2",
-                    "4":"0",
+                    "4":"6",
                     "5":"0",
                     "6":"6",
-                    "7":"0",
+                    "7":"1",
                     "8":"1",
-                    "9":"0",
+                    "9":"5",
                     "10":"3",
                     "11":"0",
-                    "12":"0"
+                    "12":"4"
                    }
 objnav12_objnav6cat = {int(k): int(v) for k,v in objnav12_objnav6cat.items()}
 

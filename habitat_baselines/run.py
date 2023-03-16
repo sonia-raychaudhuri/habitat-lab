@@ -15,6 +15,8 @@ from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.config.default import get_config
 from habitat_baselines.rl.ppo.ppo_trainer_sem_map import SemMapOnTrainer
 from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_rednet import PredSemMapRedNetOnTrainer
+from habitat_baselines.rl.ppo.ppo_trainer_sem_map_frontier import SemMapOnFrontierTrainer
+from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_detic import PredSemMapDeticOnTrainer
 
 
 def main():

@@ -255,6 +255,27 @@ _C.TASK.DISTANCE_TO_GOAL = CN()
 _C.TASK.DISTANCE_TO_GOAL.TYPE = "DistanceToGoal"
 _C.TASK.DISTANCE_TO_GOAL.DISTANCE_TO = "POINT"
 # -----------------------------------------------------------------------------
+# # EUCLIDEAN DISTANCE_TO_GOAL MEASUREMENT
+# -----------------------------------------------------------------------------
+_C.TASK.EUC_DISTANCE_TO_GOAL = CN()
+_C.TASK.EUC_DISTANCE_TO_GOAL.TYPE = "EucDistanceToGoal"
+# -----------------------------------------------------------------------------
+# # EUC DISTANCE_TO_GOAL OBB MEASUREMENT
+# -----------------------------------------------------------------------------
+_C.TASK.EUC_DISTANCE_TO_GOAL_OBB = CN()
+_C.TASK.EUC_DISTANCE_TO_GOAL_OBB.TYPE = "EucDistanceToGoalOBB"
+# -----------------------------------------------------------------------------
+# # EUC DISTANCE_TO_GOAL TO VIEW POINTS MEASUREMENT
+# -----------------------------------------------------------------------------
+_C.TASK.EUC_DISTANCE_TO_VP = CN()
+_C.TASK.EUC_DISTANCE_TO_VP.TYPE = "EucDistanceToViewPoints"
+# -----------------------------------------------------------------------------
+# # PIXEL_COV_OF_GOAL
+# -----------------------------------------------------------------------------
+_C.TASK.PIXEL_COV_OF_GOAL = CN()
+_C.TASK.PIXEL_COV_OF_GOAL.TYPE = "PixelCoverageOfGoal"
+_C.TASK.PIXEL_COV_OF_GOAL.VISIBILITY_THRESHOLD = 0.001
+# -----------------------------------------------------------------------------
 # # ANSWER_ACCURACY MEASUREMENT
 # -----------------------------------------------------------------------------
 _C.TASK.ANSWER_ACCURACY = CN()

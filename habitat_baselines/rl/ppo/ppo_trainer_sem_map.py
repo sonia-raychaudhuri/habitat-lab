@@ -1191,10 +1191,9 @@ class SemMapOnTrainer(BaseRLTrainer):
         os.makedirs(results_dir, exist_ok=True)
         _creation_timestamp = str(time.time())
         with open(os.path.join(results_dir, f"stats_all_{_creation_timestamp}.csv"), 'a') as f:
-            csv_header = ["episode_id","reward","total_area","covered_area",
-                          "covered_area_ratio","episode_length","distance_to_currgoal",
-                          "distance_to_multi_goal","sub_success","success","mspl",
-                          "progress","pspl"]
+            csv_header = ['episode_id','reward', 'total_area', 'covered_area', 'covered_area_ratio', 'distance_to_goal', 
+                            'success', 'spl', 'softspl', 'episode_length', 'euc_distance_to_goal', 
+                            'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb']
             _csv_writer = csv.writer(f)
             _csv_writer.writerow(csv_header)
 
