@@ -119,6 +119,127 @@ def bin_points_w_sem(XYZS_cms, map_size, z_bins, xy_resolution, map_center):
 
     return counts, sem_labels
 
+def bin_points_w_sem_w_score(XYZS_cms, map_size, z_bins, xy_resolution, map_center):
+    """Bins points into xy-z bins
+    XYZS_cms is ... x H x W x4 -> 3D coordinates + semantic channel
+    Outputs is ... x map_size x map_size x (len(z_bins)+1)
+    """
+    sh = XYZS_cms.shape
+    XYZS_cms = XYZS_cms.reshape([-1, sh[-3], sh[-2], sh[-1]])
+    n_z_bins = len(z_bins) + 1
+    
+    isnotnan = np.logical_not(np.isnan(XYZS_cms[:, :, :, 0]))
+    X_bin = np.round((XYZS_cms[:, :, :, 0] / xy_resolution) + map_center[0]).astype(np.int32)
+    Y_bin = np.round((XYZS_cms[:, :, :, 1] / xy_resolution) + map_center[1]).astype(np.int32)
+    Z_bin = np.digitize(XYZS_cms[:, :, :, 2], bins=z_bins).astype(np.int32)
+    S_bin = XYZS_cms[:, :, :, 3].astype(np.int32)
+    S_score_bin = XYZS_cms[:, :, :, 4].astype(np.int32)
+
+    isvalid = np.array([X_bin >= 0, X_bin < map_size, Y_bin >= 0,
+                        Y_bin < map_size,
+                        Z_bin >= 0, Z_bin < n_z_bins, isnotnan])
+    isvalid = np.all(isvalid, axis=0)
+
+    ind = (Y_bin * map_size + X_bin) * n_z_bins + Z_bin
+    ind[np.logical_not(isvalid)] = 0
+    
+    counts = []
+    sem_labels = []
+    sem_scores = []
+    for i in range(sh[0]):
+        count = np.bincount(ind[i].ravel(), isvalid[i].ravel().astype(np.int32),
+                            minlength=map_size * map_size * n_z_bins)
+        
+        sem_label = count.copy()
+        sem_label[ind[i][isvalid[i]]] = S_bin[i][isvalid[i]]    #  replace count with the semantic label
+        
+        sem_score = count.copy()
+        sem_score[ind[i][isvalid[i]]] = S_score_bin[i][isvalid[i]]    #  replace count with the semantic label
+        
+        counts.append(np.reshape(count, [map_size, map_size, n_z_bins]))
+        sem_labels.append(np.reshape(sem_label, [map_size, map_size, n_z_bins]))
+        sem_scores.append(np.reshape(sem_score, [map_size, map_size, n_z_bins]))
+
+    #counts = np.concatenate(counts, axis=0).reshape(sh[0], map_size, map_size, n_z_bins)
+    counts = np.concatenate(counts, axis=0).reshape(list(sh[:-3]) + [map_size, map_size, n_z_bins])
+    #sem_labels = np.concatenate(sem_labels, axis=0).reshape(sh[0], map_size, map_size, n_z_bins)
+    sem_labels = np.concatenate(sem_labels, axis=0).reshape(list(sh[:-3]) + [map_size, map_size, n_z_bins])
+    sem_scores = np.concatenate(sem_scores, axis=0).reshape(list(sh[:-3]) + [map_size, map_size, n_z_bins])
+
+    return counts, sem_labels, sem_scores
+
+def project_sem(XYZS_cms, map_size, z_bins, xy_resolution, map_center):
+    """Bins points into xy-z bins
+    XYZS_cms is ... x H x W x4 -> 3D coordinates + semantic channel
+    Outputs is ... x map_size x map_size x (len(z_bins)+1)
+    """
+    sh = XYZS_cms.shape
+    XYZS_cms = XYZS_cms.reshape([-1, sh[-3], sh[-2], sh[-1]])
+    n_z_bins = len(z_bins) + 1
+    
+    isnotnan = np.logical_not(np.isnan(XYZS_cms[:, :, :, 0]))
+    X_bin = np.round((XYZS_cms[:, :, :, 0] / xy_resolution) + map_center[0]).astype(np.int32)
+    Y_bin = np.round((XYZS_cms[:, :, :, 1] / xy_resolution) + map_center[1]).astype(np.int32)
+    Z_bin = np.digitize(XYZS_cms[:, :, :, 2], bins=z_bins).astype(np.int32)
+    S_bin = XYZS_cms[:, :, :, 3].astype(np.int32)
+
+    isvalid = np.array([X_bin >= 0, X_bin < map_size, Y_bin >= 0,
+                        Y_bin < map_size,
+                        Z_bin >= 0, Z_bin < n_z_bins, isnotnan, S_bin > 0])
+    isvalid = np.all(isvalid, axis=0)
+
+    ind = Y_bin * map_size + X_bin
+    ind[np.logical_not(isvalid)] = 0
+    
+    sem_labels = []
+    for i in range(sh[0]):
+        sem_label = np.zeros((map_size * map_size))
+        sem_label[ind[i]]=S_bin[i]
+        sem_labels.append(np.reshape(sem_label, [map_size, map_size]))
+    
+    sem_labels = np.concatenate(sem_labels, axis=0).reshape([sh[0], map_size, map_size])
+
+    return sem_labels
+
+def project_sem_w_scores(XYZS_cms, map_size, z_bins, xy_resolution, map_center):
+    """Bins points into xy-z bins
+    XYZS_cms is ... x H x W x4 -> 3D coordinates + semantic channel
+    Outputs is ... x map_size x map_size x (len(z_bins)+1)
+    """
+    sh = XYZS_cms.shape
+    XYZS_cms = XYZS_cms.reshape([-1, sh[-3], sh[-2], sh[-1]])
+    n_z_bins = len(z_bins) + 1
+    
+    isnotnan = np.logical_not(np.isnan(XYZS_cms[:, :, :, 0]))
+    X_bin = np.round((XYZS_cms[:, :, :, 0] / xy_resolution) + map_center[0]).astype(np.int32)
+    Y_bin = np.round((XYZS_cms[:, :, :, 1] / xy_resolution) + map_center[1]).astype(np.int32)
+    Z_bin = np.digitize(XYZS_cms[:, :, :, 2], bins=z_bins).astype(np.int32)
+    S_bin = XYZS_cms[:, :, :, 3].astype(np.int32)
+    S_score_bin = XYZS_cms[:, :, :, 4].astype(np.int32)
+
+    isvalid = np.array([X_bin >= 0, X_bin < map_size, Y_bin >= 0,
+                        Y_bin < map_size,
+                        Z_bin >= 0, Z_bin < n_z_bins, isnotnan, S_bin > 0])
+    isvalid = np.all(isvalid, axis=0)
+
+    ind = Y_bin * map_size + X_bin
+    ind[np.logical_not(isvalid)] = 0
+    
+    sem_labels = []
+    sem_scores = []
+    for i in range(sh[0]):
+        sem_label = np.zeros((map_size * map_size))
+        sem_label[ind[i]]=S_bin[i]
+        sem_labels.append(np.reshape(sem_label, [map_size, map_size]))
+        
+        sem_score = np.zeros((map_size * map_size))
+        sem_score[ind[i]]=S_score_bin[i]
+        sem_scores.append(np.reshape(sem_score, [map_size, map_size]))
+    
+    sem_labels = np.concatenate(sem_labels, axis=0).reshape([sh[0], map_size, map_size])
+    sem_scores = np.concatenate(sem_scores, axis=0).reshape([sh[0], map_size, map_size])
+
+    return sem_labels, sem_scores
 
 # def bin_points_w_sem(XYZS_cms, map_size, z_bins, xy_resolution, map_center):
 #     """Bins points into xy-z bins

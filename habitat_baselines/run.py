@@ -17,6 +17,9 @@ from habitat_baselines.rl.ppo.ppo_trainer_sem_map import SemMapOnTrainer
 from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_rednet import PredSemMapRedNetOnTrainer
 from habitat_baselines.rl.ppo.ppo_trainer_sem_map_frontier import SemMapOnFrontierTrainer
 from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_detic import PredSemMapDeticOnTrainer
+from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_detic_chal2021 import PredSemMapDeticChal2021OnTrainer
+from habitat_baselines.rl.ppo.ppo_trainer_orasem_chal2021 import OraSemChal2021OnTrainer
+from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_chal2021_rednet import PredSemMapRedNetChal2021OnTrainer
 
 
 def main():

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch_scatter
+# import torch_scatter
 
 
 def get_grid(pose, grid_size, device):
@@ -118,12 +118,12 @@ class ProjectToGroundPlane():
         linear_locs_ss = rearrange(linear_locs_ss, 'b h w -> b () (h w)')
         linear_locs_ss = linear_locs_ss.expand(-1, f, -1) # .contiguous()
 
-        proj_feats, _ = torch_scatter.scatter_max(
-                            conv_masked,
-                            linear_locs_ss,
-                            dim=2,
-                            dim_size=outh*outw,
-                        )
+        # proj_feats, _ = torch_scatter.scatter_max(
+        #                     conv_masked,
+        #                     linear_locs_ss,
+        #                     dim=2,
+        #                     dim_size=outh*outw,
+        #                 )
         proj_feats = rearrange(proj_feats, 'b e (h w) -> b e h w', h=outh)
 
         # Replace invalid features with zeros

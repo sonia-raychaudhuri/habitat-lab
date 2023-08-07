@@ -82,8 +82,8 @@ import habitat_baselines.common.rotation_utils as ru
 #from habitat_baselines.common.object_detector_cyl import ObjectDetector
 import skimage
 
-@baseline_registry.register_trainer(name="semmapon")
-class SemMapOnTrainer(BaseRLTrainer):
+@baseline_registry.register_trainer(name="semmapon2021")
+class OraSemChal2021OnTrainer(BaseRLTrainer):
     r"""Trainer class for predicted semantic map
     """
     supported_tasks = ["Nav-v0"]

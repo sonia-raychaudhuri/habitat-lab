@@ -19,6 +19,7 @@ from numpy import float32, ndarray, uint8
 from torch import Tensor
 import torch
 from torch import nn
+from torchvision import ops
 import tqdm
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -29,11 +30,13 @@ from habitat_baselines.common.env_utils import construct_envs
 from habitat_baselines.common.environments import get_env_class
 from habitat_baselines.common.tensorboard_utils import (
     TensorboardWriter,
+    # get_writer
 )
 from habitat_baselines.utils.common import (
     batch_obs,
     generate_video,
     linear_decay,
+    # action_array_to_dict,
     # get_num_actions,
     # is_continuous_action_space,
     ObservationBatchingCache,
@@ -77,14 +80,102 @@ from habitat.utils.geometry_utils import (
 from habitat_baselines.rl.models.projection import Projection, RotateTensor, get_grid
 import habitat_baselines.common.depth_utils as du
 import habitat_baselines.common.rotation_utils as ru
-#from habitat.utils.visualizations import fog_of_war
-#import habitat_baselines.common.fog_of_war as fog_of_war
-#from habitat_baselines.common.object_detector_cyl import ObjectDetector
 import skimage
+from PIL import Image
+from PIL import ImageDraw
+from habitat.core.utils import try_cv2_import
 
-@baseline_registry.register_trainer(name="semmapon")
-class SemMapOnTrainer(BaseRLTrainer):
-    r"""Trainer class for predicted semantic map
+from habitat_baselines.common.semantic_segmentation.rednet import RedNet
+# from habitat_baselines.common.semantic_segmentation.train import load_ckpt
+import torchvision.transforms as transforms
+
+from Detic.third_party.CenterNet2.centernet.config import add_centernet_config
+from Detic.detic.config import add_detic_config
+from detectron2.engine.defaults import DefaultPredictor
+from detectron2.config import get_cfg
+from Detic.detic.modeling.text.text_encoder import build_text_encoder
+from Detic.detic.modeling.utils import reset_cls_test
+from detectron2.data import MetadataCatalog
+from detectron2.utils.visualizer import ColorMode, Visualizer
+
+cv2 = try_cv2_import()
+def get_clip_embeddings(vocabulary, prompt='a '):
+    text_encoder = build_text_encoder(pretrain=True)
+    text_encoder.eval()
+    texts = [prompt + x for x in vocabulary]
+    emb = text_encoder(texts).detach().permute(1, 0).contiguous().cpu()
+    return emb
+    
+def customize_model_vocab(predictor, metadata_classes):
+    vocabulary = 'custom'
+    metadata = MetadataCatalog.get("__unused")
+    
+    metadata.thing_classes = metadata_classes
+    classifier = get_clip_embeddings(metadata.thing_classes)
+    num_classes = len(metadata.thing_classes)
+    reset_cls_test(predictor.model, classifier, num_classes)
+    # Reset visualization threshold
+    output_score_threshold = 0.3
+    for cascade_stages in range(len(predictor.model.roi_heads.box_predictor)):
+        predictor.model.roi_heads.box_predictor[cascade_stages].test_score_thresh = output_score_threshold
+        
+    return predictor, metadata
+
+def convert_weights_cuda_cpu(weights, device):
+    names = list(weights.keys())
+    is_module = names[0].split('.')[0] == 'module'
+    if device == 'cuda' and not is_module:
+        new_weights = {'module.'+k:v for k,v in weights.items()}
+    elif device == 'cpu' and is_module:
+        new_weights = {'.'.join(k.split('.')[1:]):v for k,v in weights.items()}
+    else:
+        new_weights = weights
+    return new_weights
+
+def load_ckpt(model, optimizer, model_file, device):
+    if os.path.isfile(model_file):
+        print("=> loading checkpoint '{}'".format(model_file))
+        if device.type == 'cuda':
+            checkpoint = torch.load(model_file)
+        else:
+            checkpoint = torch.load(model_file, map_location=lambda storage, loc: storage)
+        
+        model_state = convert_weights_cuda_cpu(checkpoint['model_state'], 'cpu')
+        model.load_state_dict(model_state)
+        if optimizer:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        print("=> loaded checkpoint '{}' (epoch {})"
+              .format(model_file, checkpoint['epoch']))
+        
+        step = checkpoint['global_step'] if 'global_step' in checkpoint else 0
+        epoch = checkpoint['epoch'] if 'epoch' in checkpoint else 0
+        return step, epoch, model
+    else:
+        print("=> no checkpoint found at '{}'".format(model_file))
+        os._exit(0)
+
+def setup_cfg(args):
+    cfg = get_cfg()
+    if args["cpu"]:
+        cfg.MODEL.DEVICE="cpu"
+    add_centernet_config(cfg)
+    add_detic_config(cfg)
+    cfg.merge_from_file(args["config_file"])
+    cfg.merge_from_list(args["opts"])
+    # Set score_threshold for builtin models
+    cfg.MODEL.RETINANET.SCORE_THRESH_TEST = args["confidence_threshold"]
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args["confidence_threshold"]
+    cfg.MODEL.PANOPTIC_FPN.COMBINE.INSTANCES_CONFIDENCE_THRESH = args["confidence_threshold"]
+    cfg.MODEL.ROI_BOX_HEAD.ZEROSHOT_WEIGHT_PATH = 'rand' # load later
+    if not args["pred_all_class"]:
+        cfg.MODEL.ROI_HEADS.ONE_CLASS_PER_PROPOSAL = True
+    cfg.freeze()
+    return cfg
+
+@baseline_registry.register_trainer(name="preddetic")
+class PredSemMapDeticOnTrainer(BaseRLTrainer):
+    r"""Trainer class for predicted semantic map with Detic
+    https://github.com/facebookresearch/Detic
     """
     supported_tasks = ["Nav-v0"]
 
@@ -283,10 +374,10 @@ class SemMapOnTrainer(BaseRLTrainer):
             self.policy_action_space = action_space
             # if is_continuous_action_space(action_space):
             #     # Assume ALL actions are NOT discrete
-            #     action_shape = 1 #(get_num_actions(action_space),)
+            #     action_shape = (get_num_actions(action_space),)
             #     discrete_actions = False
             # else:
-            # For discrete pointnav
+            #     # For discrete pointnav
             action_shape = None
             discrete_actions = True
 
@@ -912,6 +1003,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         is_goal: Tensor,
         grid_map: Tensor,
         object_maps: Tensor,
+        #pred_ious: Tensor,
     ) -> Tuple[
         VectorEnv,
         Tensor,
@@ -925,6 +1017,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         Tensor,
         Tensor,
         Tensor,
+        #Tensor,
     ]:
         # pausing self.envs with no new episode
         if len(envs_to_pause) > 0:
@@ -945,6 +1038,7 @@ class SemMapOnTrainer(BaseRLTrainer):
             is_goal = is_goal[state_index]
             grid_map = grid_map[state_index]
             object_maps = object_maps[state_index]
+            #pred_ious = pred_ious[state_index]
 
             for k, v in batch.items():
                 batch[k] = v[state_index]
@@ -963,9 +1057,10 @@ class SemMapOnTrainer(BaseRLTrainer):
             global_object_map,
             is_goal,
             grid_map,
-            object_maps
+            object_maps,
+            #pred_ious
         )
-        
+
     def _eval_checkpoint(
         self,
         checkpoint_path: str,
@@ -1034,7 +1129,7 @@ class SemMapOnTrainer(BaseRLTrainer):
             self.policy_action_space = action_space
             # if is_continuous_action_space(action_space):
             #     # Assume NONE of the actions are discrete
-            #     action_shape = 1 #(get_num_actions(action_space),)
+            #     action_shape = (get_num_actions(action_space),)
             #     discrete_actions = False
             # else:
             # For discrete pointnav
@@ -1129,6 +1224,7 @@ class SemMapOnTrainer(BaseRLTrainer):
             dtype=torch.bool,
         )
         stubborn_goal_queues = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
+        pred_ious = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
         
         ##Depth
         self.camera = du.get_camera_matrix(
@@ -1142,7 +1238,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         self.meters_covered = self.config.RL.SEM_MAP_POLICY.meters_covered
         self.map_grid_size = np.round(self.meters_covered / self.map_resolution).astype(int)
         self.map_center = np.array([np.round(self.map_grid_size/2.).astype(int), np.round(self.map_grid_size/2.).astype(int)])
-        self.grid_map = np.zeros([self.config.NUM_ENVIRONMENTS, self.map_grid_size, self.map_grid_size, 2], dtype=uint8)
+        self.grid_map = np.zeros([self.config.NUM_ENVIRONMENTS, self.map_grid_size, self.map_grid_size, 3], dtype=uint8)
         #self.grid_map[:,:,0].fill(0.5)
         #self.fog_of_war_mask = np.zeros([self.map_grid_size, self.map_grid_size], dtype=uint8)
         # Init 2D map slicing height info
@@ -1150,9 +1246,16 @@ class SemMapOnTrainer(BaseRLTrainer):
         #   [elevation+slice_range_below, elevation+slice_range_above]
         self.slice_range_below = -1 # Should be 0 or negative
         self.slice_range_above = 10.5 # Should be 0 or positive
-        self.z_bins = [0.05, 3.5]
+        self.z_bins = [0.0, 10.5] #[0.05, 3.5]
         
         ##
+        
+        #RedNet
+        # self.normalize = transforms.Compose([transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                         std=[0.229, 0.224, 0.225])])
+
+        # self.depth_normalize = transforms.Normalize(mean=[0.213], std=[0.285])
+        #
         
         self.object_maps = torch.zeros(
             self.config.NUM_ENVIRONMENTS,
@@ -1179,21 +1282,51 @@ class SemMapOnTrainer(BaseRLTrainer):
                     self.config.RL.SEM_MAP_POLICY.coordinate_min], device=self.device)
         # 
         
-        #_detector = ObjectDetector()
-        # self.selem = skimage.morphology.disk(1)
+        model_name = 'Detic_LI_CLIP_SwinB_896b32_4x_ft4x_max-size'
+        # Detic
+        detic_cfg = {
+            "confidence_threshold": 0.5,
+            "config_file": f"Detic/configs/{model_name}.yaml",
+            "cpu": False,
+            "custom_vocabulary": "",
+            "vocabulary": "lvis",
+            "opts": [
+                "MODEL.WEIGHTS",
+                f"models/{model_name}.pth"
+            ],
+            "pred_all_class": False
+            
+        }
+        self.predictor = DefaultPredictor(setup_cfg(detic_cfg))
+        self.predictor, self.metadata = customize_model_vocab(self.predictor, self.config.RL.SEM_MAP_POLICY.metadata_classes)
+        #
+
+        # self.model_rednet = RedNet(config.IL.RedNet)
+        # self.model_rednet = self.model_rednet.to(self.device)
+        # _, _, self.model_rednet = load_ckpt(self.model_rednet, None, self.config.IL.RedNet.last_ckpt, self.device)
+        # self.model_rednet.eval()
+        
+        self.pred_acc_bg_obj = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
+        self.pred_acc_obj = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
+        self.pred_precision_obj = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
+        self.pred_recall_obj = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
+        self.pred_f1_score = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
+        self.pred_acc_goal = [[] for _ in range(self.config.NUM_ENVIRONMENTS)]
         
         stats_episodes: Dict[
             Any, Any
         ] = {}  # dict of dicts that stores stats per episode
-        
+
         # Saving all predictions
         results_dir = os.path.join(self.config.RESULTS_DIR, self.config.EVAL.SPLIT)
         os.makedirs(results_dir, exist_ok=True)
         _creation_timestamp = str(time.time())
         with open(os.path.join(results_dir, f"stats_all_{_creation_timestamp}.csv"), 'a') as f:
-            csv_header = ['episode_id','reward', 'total_area', 'covered_area', 'covered_area_ratio', 'distance_to_goal', 
-                            'success', 'spl', 'softspl', 'episode_length', 'euc_distance_to_goal', 
-                            'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb']
+            csv_header = ['episode_id', 'reward', 'total_area', 'covered_area', 'covered_area_ratio', 
+                          'prediction_accuracy_bg_obj', 'prediction_accuracy_goal', 'prediction_accuracy_obj', 
+                          'prediction_precision', 'prediction_recall', 'prediction_f1_score', 'goal_seen', 
+                          'distance_to_goal', 'success', 'spl', 'softspl', 'episode_length', 'euc_distance_to_goal', 
+                          'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb', 'pred_iou']
             _csv_writer = csv.writer(f)
             _csv_writer.writerow(csv_header)
 
@@ -1203,6 +1336,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         if len(self.config.VIDEO_OPTION) > 0:
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
+        self.max_sem_id = 1
         number_of_eval_episodes = self.config.TEST_EPISODE_COUNT
         if number_of_eval_episodes == -1:
             number_of_eval_episodes = sum(self.envs.number_of_episodes)
@@ -1227,22 +1361,53 @@ class SemMapOnTrainer(BaseRLTrainer):
             next_goal_category = batch['objectgoal']
             
             # 1) Get map with all objects
-            self.object_maps, agent_locs = self.build_map(batch, self.object_maps, self.grid_map)
+            self.object_maps, agent_locs, semantic, _pred_ious = self.build_map(batch, self.object_maps, self.grid_map)
             self.gt_maps = batch['object_map'][:,:,:,0]
             self.gt_maps[self.gt_maps > 0] = 1.
+            self.gt_semantic = batch['semantic_labels'].squeeze(-1).cpu().numpy()
                 
             for i in range(self.envs.num_envs):
-                # Dilate object positions on map
-                # obj_map = skimage.morphology.binary_dilation(
-                #     self.object_maps[i, :, :, 1].cpu().numpy(),
-                #     self.selem)
-                # self.object_maps[i, :, :, 1] = torch.tensor(obj_map)
-                
+                pred_ious[i].append(_pred_ious[i].item())
                 # visited for coverage
                 self.visited[
                     i,
                     min(agent_locs[i, 0],self.map_grid_size-1), 
                     min(agent_locs[i, 1],self.map_grid_size-1)] = 1
+                
+                # Prediction accuracy
+                _acc = semantic[i,:,:,0] == self.gt_semantic[i] # background+object detection
+                self.pred_acc_bg_obj[i].append(_acc[_acc==True].sum() / np.product(_acc.shape))
+                
+                # Goal prediction accuracy
+                _next_goal = (next_goal_category[i].item()+1)
+                if _next_goal in semantic[i,:,:,0]:
+                    _acc = np.where(semantic[i,:,:,0] == _next_goal, semantic[i,:,:,0] == self.gt_semantic[i], 0)
+                    _gt_goal = self.gt_semantic[i][self.gt_semantic[i] == _next_goal]
+                    self.pred_acc_goal[i].append((_acc.sum() / _gt_goal.shape[0]) if _gt_goal.shape[0]>0 else 1)
+                
+                if self.gt_semantic[i][self.gt_semantic[i] > 0].shape[0] > 0:
+                    _acc = np.where(semantic[i,:,:,0]>0, semantic[i,:,:,0] == self.gt_semantic[i], 0)   # object detection
+                    self.pred_acc_obj[i].append(_acc.sum() / self.gt_semantic[i][self.gt_semantic[i] > 0].shape[0])
+        
+                    ## TP -> (detected obj == GT); FP -> (obj detected, but no GT obj)
+                    ## FN -> (no detected obj, but there are GT obj); TN -> (no obj detected, & no GT obj)
+                    _tp = np.where(semantic[i,:,:,0]>0, semantic[i,:,:,0] == self.gt_semantic[i], 0).sum()
+                    _fp = np.where(semantic[i,:,:,0]>0, semantic[i,:,:,0] != self.gt_semantic[i], 0).sum()
+                    _fn = np.where(semantic[i,:,:,0]==0, semantic[i,:,:,0] != self.gt_semantic[i], 0).sum()
+                    _tn = np.where(semantic[i,:,:,0]==0, semantic[i,:,:,0] == self.gt_semantic[i], 0).sum()
+                    
+                    # Calculate precision
+                    _prec = (_tp/(_tp+_fp)) if (_tp+_fp) > 0 else 0.
+                    self.pred_precision_obj[i].append(_prec)
+                
+                    # Calculate recall
+                    _rec = (_tp/(_tp+_fn)) if (_tp+_fn) > 0 else 0.
+                    self.pred_recall_obj[i].append(_rec)
+                    
+                    # Calculate F1 score
+                    _f1 = (2 * ( (_prec * _rec) / (_prec + _rec) )) if (_prec + _rec) > 0 else 0.
+                    self.pred_f1_score[i].append(_f1)
+        
                 # mark agent
                 self.object_maps[i, :, :, 2] = 0
                 #self.object_maps[i, agent_locs[i, 0], agent_locs[i, 1], 2] = 10
@@ -1309,6 +1474,46 @@ class SemMapOnTrainer(BaseRLTrainer):
                                 _goal = stubborn_goal_queues[i].pop(0)
                                 goal_grid_loc = _goal
                                 stubborn_goal_queues[i].append(_goal)
+                        
+                        elif self.config.RL.POLICY.EXPLORATION_STRATEGY == "frontier":
+                            agent_angle = batch[i]['episodic_rotation'].cpu().numpy()
+                            # explore
+                            _explored_map = np.maximum(self.visited[i].cpu().numpy(),self.object_maps[i, :, :, 0].cpu().numpy())
+                            _agent = agent_grid_loc.cpu().numpy()
+                            frontier_pnts, frontier_map = self.findFrontier(_explored_map, 
+                                                            _agent, 
+                                                            agent_angle)
+                            
+                            if len(frontier_pnts) > 0:
+                                #goal_grid_loc = torch.tensor(frontier_pnts[0])
+                                frontier_goal_ind = 0
+                                if ("frontier_nearest_select" in self.config.habitat_baselines.rl.policy and
+                                    self.config.habitat_baselines.rl.policy.frontier_nearest_select):
+                                    dist_to_frontiers = np.array([np.linalg.norm(_agent - f, ord=2)
+                                                        for f in frontier_pnts])
+                                    select_dist = (self.config.habitat_baselines.rl.policy.frontier_nearest_select_dist 
+                                                if "frontier_nearest_select_dist" in self.config.habitat_baselines.rl.policy
+                                                else 0) # how far a point should it select
+                                    d = np.where(dist_to_frontiers < select_dist, 
+                                                float('inf'), 
+                                                dist_to_frontiers - select_dist)
+                                    frontier_goal_ind = np.argmin(d)
+                                else:
+                                    frontier_goal_ind = random.randint(0,len(frontier_pnts)-1)
+                                    
+                                # if len(self.config.VIDEO_OPTION) > 0:
+                                #     # Debug (visualization)
+                                #     exp = np.maximum(_explored_map, frontier_map).astype(np.int)
+                                #     exp[frontier_pnts[frontier_goal_ind][0]-1:frontier_pnts[frontier_goal_ind][0]+1, 
+                                #         frontier_pnts[frontier_goal_ind][1]-1:frontier_pnts[frontier_goal_ind][1]+1] = 11
+                                #     exp[_agent[0]-1:_agent[0]+1, _agent[1]-1:_agent[1]+1] = 10
+                                #     epi_id = os.path.basename(current_episodes[i].scene_id) + '_' + current_episodes[i].episode_id
+                                #     Image.fromarray(
+                                #                 multion_maps.OBJECT_MAP_COLORS[exp]
+                                #             ).save(f"{self.config.VIDEO_DIR}/debug_frontier_steps/{epi_id}_{time.time()}.jpg")
+                                    #
+                                    
+                                goal_grid_loc = torch.tensor(frontier_pnts[frontier_goal_ind])
                             
                         else:
                             # Random Exploration Strategy: selecting a random location around the agent
@@ -1324,9 +1529,21 @@ class SemMapOnTrainer(BaseRLTrainer):
                         
                     else:
                         is_goal[i] = 1
-                        # goal_grid_loc = goal_grid_loc.float().mean(axis=0).type(torch.uint8)  # select one
-                        # goal_grid_loc = random.choice(goal_grid_loc)  # select any one
-                        goal_grid_loc = goal_grid_loc[0].type(torch.uint8)
+                        
+                        
+                        if self.config.RL.SEM_MAP_POLICY.goal_select_first_goal:
+                            goal_grid_loc = goal_grid_loc[0]
+                        else:
+                            if len(goal_grid_loc) > 1:
+                                _score = 0
+                                _goal = []
+                                for g in goal_grid_loc:
+                                    if self.object_maps[i,g[0].item(),g[1].item(),4].item() > _score:
+                                        _goal = g
+                                        _score = self.object_maps[i,g[0].item(),g[1].item(),4].item()
+                                goal_grid_loc = _goal
+                            else:
+                                goal_grid_loc = goal_grid_loc.float().mean(axis=0).type(torch.uint8)  # select one
                     
                     goal_grid[i] = goal_grid_loc
                     
@@ -1347,7 +1564,7 @@ class SemMapOnTrainer(BaseRLTrainer):
                             int(max(0, goal_grid_loc[0]-self.config.RL.SEM_MAP_POLICY.object_padding)): int(min(oracle_map_size[i][0][0], goal_grid_loc[0]+self.config.RL.SEM_MAP_POLICY.object_padding)), 
                             int(max(0, goal_grid_loc[1]-self.config.RL.SEM_MAP_POLICY.object_padding)): int(min(oracle_map_size[i][0][1], goal_grid_loc[1]+self.config.RL.SEM_MAP_POLICY.object_padding)), 
                             3] = 11  # num of objects=8, agent marked as 10
-                if is_goal[i] == 0:
+                if is_goal[i].item() == 0:
                     steps_towards_short_term_goal[i] += 1
                 
                 # 4) Convert 3D world positions to polar coordinates
@@ -1392,19 +1609,20 @@ class SemMapOnTrainer(BaseRLTrainer):
                 prev_actions.copy_(actions)  # type: ignore
                 
             # Check if the agent is sufficiently close to the goal - then Stop
-            for i in range(self.envs.num_envs):
-                if is_goal[i] == 1:
-                    # get agent location on the map
-                    agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
-                    if len(agent_grid_loc) > 0:
-                        agent_grid_loc = agent_grid_loc[0]
-                    else:
-                        agent_grid_loc = [0, 0]
-                    if ((np.linalg.norm(
-                        goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
-                            ord=2) * self.map_resolution) < 1.0):
-                        actions[i] = 0
-            
+            if self.config.RL.SEM_MAP_POLICY.grid_stop_distance_flag:
+                for i in range(self.envs.num_envs):
+                    if is_goal[i].item() == 1:
+                        # get agent location on the map
+                        agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
+                        if len(agent_grid_loc) > 0:
+                            agent_grid_loc = agent_grid_loc[0]
+                        else:
+                            agent_grid_loc = [0, 0]
+                        if ((np.linalg.norm(
+                            goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
+                                ord=2) * self.map_resolution) < self.config.RL.SEM_MAP_POLICY.grid_stop_distance):
+                            actions[i] = 0
+                        
             # NB: Move actions to CPU.  If CUDA tensors are
             # sent in to env.step(), that will create CUDA contexts
             # in the subprocesses.
@@ -1450,14 +1668,28 @@ class SemMapOnTrainer(BaseRLTrainer):
                     episode_stats = {
                         "reward": current_episode_reward[i].item()
                     }
+                    infos[i].update(
+                        {"pred_iou": np.array(pred_ious[i]).mean()}
+                    )
                     
-                    total_area = self.gt_maps[i,:,:].sum()
-                    cov_area = self.object_maps[i,:,:,0].sum()
-                    coverage_ratio = cov_area / self.gt_maps[i,:,:].sum()
+                    total_area = self.gt_maps[i,:,:].sum().item()
+                    cov_area = self.object_maps[i,:,:,0].sum().item()
+                    coverage_ratio = (cov_area / total_area) if total_area > 0 else 0
                     episode_stats.update({
-                        "total_area": total_area.item(),
-                        "covered_area": cov_area.item(),
-                        "covered_area_ratio": coverage_ratio.item()
+                        "total_area": total_area,
+                        "covered_area": cov_area,
+                        "covered_area_ratio": coverage_ratio,
+                        "prediction_accuracy_bg_obj": (np.nanmean(np.array(self.pred_acc_bg_obj[i])) if len(self.pred_acc_bg_obj[i])>0 else 0),
+                        "prediction_accuracy_goal": (np.nanmean(np.array(self.pred_acc_goal[i])) if len(self.pred_acc_goal[i])>0 else 0),
+                        "prediction_accuracy_obj": (np.nanmean(np.array(self.pred_acc_obj[i])) if len(self.pred_acc_obj[i])>0 else 0),
+                        "prediction_precision": (np.nanmean(np.array(self.pred_precision_obj[i])) if len(self.pred_precision_obj[i])>0 else 0),
+                        "prediction_recall": (np.nanmean(np.array(self.pred_recall_obj[i])) if len(self.pred_recall_obj[i])>0 else 0),
+                        "prediction_f1_score": (np.nanmean(np.array(self.pred_f1_score[i])) if len(self.pred_f1_score[i])>0 else 0),
+                    })
+                    
+                    # update whether it has seen the goal
+                    episode_stats.update({
+                        "goal_seen": is_goal[i].item()
                     })
                     
                     episode_stats.update(
@@ -1475,7 +1707,8 @@ class SemMapOnTrainer(BaseRLTrainer):
                     if len(self.config.VIDEO_OPTION) > 0:
                         frame = observations_to_image(
                                 observation=batch[i], info=infos[i], action=actions[i].cpu().numpy(),
-                                object_map=self.object_maps[i], 
+                                object_map=self.object_maps[i],
+                                predicted_semantic=semantic[i,:,:,0], 
                                 #semantic_projections=(self.map > 0), #projection[i], 
                                 #global_object_map=global_object_map[i], 
                                 #agent_view=agent_view[i],
@@ -1487,7 +1720,20 @@ class SemMapOnTrainer(BaseRLTrainer):
                             _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
                             if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
                                 _m["collision_count"] = collision_threshold_steps[i].item()
-                            _m["coverage_ratio"] = coverage_ratio
+                            _m["total_area"] = self.gt_maps[i,:,:].sum().item()
+                            cov_area = self.object_maps[i,:,:,0].sum().item() #self.visited[i,:,:].sum()
+                            _m["visited_area"] = cov_area
+                            _m["coverage_ratio"] = cov_area / self.gt_maps[i,:,:].sum().item()
+                            _m["prediction_accuracy_bg_obj"] = (np.nanmean(np.array(self.pred_acc_bg_obj[i])) if len(self.pred_acc_bg_obj[i])>0 else 0)
+                            _m["prediction_accuracy_goal"] = (np.nanmean(np.array(self.pred_acc_goal[i])) if len(self.pred_acc_goal[i])>0 else 0)
+                            _m["prediction_accuracy_obj"] = (np.nanmean(np.array(self.pred_acc_obj[i])) if len(self.pred_acc_obj[i])>0 else 0)
+                            _m["prediction_precision"] = (np.nanmean(np.array(self.pred_precision_obj[i])) if len(self.pred_precision_obj[i])>0 else 0)
+                            _m["prediction_recall"] = (np.nanmean(np.array(self.pred_recall_obj[i])) if len(self.pred_recall_obj[i])>0 else 0)
+                            _m["prediction_f1_score"] = (np.nanmean(np.array(self.pred_f1_score[i])) if len(self.pred_f1_score[i])>0 else 0)
+                            _m["predicted_objs"] = str(np.unique(semantic[i,:,:,0]))
+                            _m["predicted_obj_names"] = str(np.array([maps.OBJNAV_CATEGORY_MAP[ind] for ind in np.unique(semantic[i,:,:,0])]))
+                            _m["GT_objs"] = str(np.unique(self.gt_semantic[i]))
+                            _m["GT_objs_names"] = str(np.array([maps.OBJNAV_CATEGORY_MAP[ind] for ind in np.unique(self.gt_semantic[i])]))
                             frame = overlay_frame(frame, _m)
 
                         rgb_frames[i].append(frame)
@@ -1545,13 +1791,20 @@ class SemMapOnTrainer(BaseRLTrainer):
                     )
                     is_goal[i] = 0
                     collision_threshold_steps[i] = 0
-                    self.grid_map[i,:,:,:] = np.zeros([self.map_grid_size, self.map_grid_size, 2], dtype=uint8)
+                    self.grid_map[i,:,:,:] = np.zeros([self.map_grid_size, self.map_grid_size, 3], dtype=uint8)
                     self.visited[i,:,:] = torch.zeros(
                         self.map_grid_size,
                         self.map_grid_size,
                         device=self.device,
                         dtype=torch.long,
                     )
+                    pred_ious[i] = []
+                    self.pred_acc_bg_obj[i] = []
+                    self.pred_acc_obj[i] = []
+                    self.pred_precision_obj[i] = []
+                    self.pred_recall_obj[i] = []
+                    self.pred_f1_score[i] = []
+                    self.pred_acc_goal[i] = []
                     
                     # Saving the prediction
                     with open(os.path.join(results_dir, f"stats_all_{_creation_timestamp}.csv"), 'a') as f:
@@ -1568,6 +1821,7 @@ class SemMapOnTrainer(BaseRLTrainer):
                         frame = observations_to_image(
                                 observation=observations[i], info=infos[i], action=actions[i].cpu().numpy(),
                                 object_map=self.object_maps[i], 
+                                predicted_semantic=semantic[i,:,:,0],
                                 #semantic_projections=(self.map > 0), #projection[i], 
                                 #global_object_map=global_object_map[i], 
                                 #agent_view=agent_view[i],
@@ -1579,10 +1833,20 @@ class SemMapOnTrainer(BaseRLTrainer):
                             _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
                             if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
                                 _m["collision_count"] = collision_threshold_steps[i].item()
-                            _m["total_area"] = self.gt_maps[i,:,:].sum()
-                            cov_area = self.object_maps[i,:,:,0].sum() #self.visited[i,:,:].sum()
+                            _m["total_area"] = self.gt_maps[i,:,:].sum().item()
+                            cov_area = self.object_maps[i,:,:,0].sum().item() #self.visited[i,:,:].sum()
                             _m["visited_area"] = cov_area
-                            _m["coverage_ratio"] = cov_area / self.gt_maps[i,:,:].sum()
+                            _m["coverage_ratio"] = cov_area / self.gt_maps[i,:,:].sum().item()
+                            _m["prediction_accuracy_bg_obj"] = (np.nanmean(np.array(self.pred_acc_bg_obj[i])) if len(self.pred_acc_bg_obj[i])>0 else 0)
+                            _m["prediction_accuracy_goal"] = (np.nanmean(np.array(self.pred_acc_goal[i])) if len(self.pred_acc_goal[i])>0 else 0)
+                            _m["prediction_accuracy_obj"] = (np.nanmean(np.array(self.pred_acc_obj[i])) if len(self.pred_acc_obj[i])>0 else 0)
+                            _m["prediction_precision"] = (np.nanmean(np.array(self.pred_precision_obj[i])) if len(self.pred_precision_obj[i])>0 else 0)
+                            _m["prediction_recall"] = (np.nanmean(np.array(self.pred_recall_obj[i])) if len(self.pred_recall_obj[i])>0 else 0)
+                            _m["prediction_f1_score"] = (np.nanmean(np.array(self.pred_f1_score[i])) if len(self.pred_f1_score[i])>0 else 0)
+                            _m["predicted_objs"] = str(np.unique(semantic[i,:,:,0]))
+                            _m["predicted_obj_names"] = str(np.array([maps.OBJNAV_CATEGORY_MAP[ind] for ind in np.unique(semantic[i,:,:,0])]))
+                            _m["GT_objs"] = str(np.unique(self.gt_semantic[i]))
+                            _m["GT_objs_names"] = str(np.array([maps.OBJNAV_CATEGORY_MAP[ind] for ind in np.unique(self.gt_semantic[i])]))
                             frame = overlay_frame(frame, _m)
 
                         rgb_frames[i].append(frame)
@@ -1593,7 +1857,7 @@ class SemMapOnTrainer(BaseRLTrainer):
                         collision_threshold_steps[i] = 0
 
                     if ((actions[i].item() == 0 and infos[i]["success"] == 1) or
-                            is_goal[i] == 0 and (
+                            is_goal[i].item() == 0 and (
                             ((self.config.RL.POLICY.EXPLORATION_STRATEGY == "" or self.config.RL.POLICY.EXPLORATION_STRATEGY == "random") 
                                 and steps_towards_short_term_goal[i].item() >= self.config.RL.POLICY.MAX_STEPS_BEFORE_GOAL_SELECTION) or
                             (self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn" and 
@@ -1625,7 +1889,8 @@ class SemMapOnTrainer(BaseRLTrainer):
                 global_object_map,
                 is_goal,
                 self.grid_map,
-                self.object_maps
+                self.object_maps,
+                #pred_ious
             ) = self._pause_envs(
                 envs_to_pause,
                 self.envs,
@@ -1639,7 +1904,8 @@ class SemMapOnTrainer(BaseRLTrainer):
                 global_object_map,
                 is_goal,
                 self.grid_map,
-                self.object_maps
+                self.object_maps,
+                #pred_ious
             )
 
         num_episodes = len(stats_episodes)
@@ -1679,20 +1945,66 @@ class SemMapOnTrainer(BaseRLTrainer):
         depth[depth == 0] = np.NaN
         #depth[depth > 10] = np.NaN
 
-        semantic = observations['semantic_labels'].unsqueeze(-1).cpu().numpy()
+        #gt_semantic = observations['semantic_labels'].squeeze(-1).cpu().numpy()
         theta = observations['episodic_compass'].cpu().numpy()
         location = observations["episodic_gps"].cpu().numpy()
+        rgb = observations["rgb"] #.type(torch.float32)
+        semantic = torch.zeros(rgb.shape[0], rgb.shape[1], rgb.shape[2], 2, dtype=torch.long)
+        # depth_transformed = np.zeros((self.config.NUM_ENVIRONMENTS, rgb.shape[1], rgb.shape[2]))
+        # predictions = []
+        # folder_path = "/localhome/sraychau/Projects/Research/MultiON/codebase/modmon/test_detic"
+        # img_path = os.path.join(folder_path, "input_rgb/640X480")
+
+        for i, im in enumerate(rgb):
+            img = im.cpu().numpy()
+            p = self.predictor(img)
+            # depth_transformed[i] = cv2.resize(
+            #                             depth[i,:,:],
+            #                             (img.shape[1],img.shape[0]),
+            #                             interpolation=cv2.INTER_CUBIC,
+            #                         )
+            # predictions.append(p)
+            # v = Visualizer(img[:, :, ::-1], self.metadata)
+            instances = p["instances"].to("cpu")
+            # vis_output = v.draw_instance_predictions(predictions=instances)
+            # vis_output.save(f"debug/out{i}.jpg")
+            for c_ind, c in enumerate(instances.pred_classes):
+                # Image.fromarray(img).save(f"{img_path}/rgb_{str(time.time())}.png")
+                # gt_sem = gt_semantic[i].astype(np.uint8)
+                # gt_sem = np.stack([gt_sem for _ in range(3)], axis=2)
+                # Image.fromarray(gt_sem).save(f"{img_path}/semantic_{str(time.time())}.png")
+                m = instances.pred_masks[c_ind]
+                sem = torch.where(m==1, c.item(), 0)
+                score = int(instances.scores[c_ind].item() * 100)
+                score_map = torch.where(m==1, score, 0)
+                # Image.fromarray(maps.OBJECT_MAP_COLORS[p.cpu().numpy().astype(np.int)+1]
+                #     ).save(
+                #     f"debug/pred_mask{i}_{c_ind}.png")
+                replace_mask = score_map > semantic[i,:,:,1]
+                semantic[i,:,:,1][replace_mask==True]=score_map[replace_mask==True]
+                semantic[i,:,:,0][replace_mask==True]=sem[replace_mask==True]
         
-        # if 5 in semantic:
-        #     print('here')
-        #res = _detector.predict(observations['rgb'])
+        # semantic = semantic[..., np.newaxis]
+        semantic = semantic.cpu().numpy()
+        # if len(np.unique(semantic[i,:,:,0])) > 1:
+        #     print('here.')
+        # sem_transformed = np.resize(semantic[:,:,:,0],depth.shape)
+        # sem_scores_transformed = np.resize(semantic[:,:,:,0],depth.shape)
+        # semantic = np.concatenate((sem_transformed[..., np.newaxis], sem_scores_transformed[..., np.newaxis]), axis=-1)
+        # depth = np.concatenate(depth_transformed[..., np.newaxis], axis=-1)
+        # depth = depth_transformed
         
+        pred_ious = torch.zeros(self.config.NUM_ENVIRONMENTS)
         coords = self._unproject_to_world(depth, location, theta)
         grid_map = self._add_to_map(coords, semantic, grid_map)
         _agent_locs = self.to_grid(location)
-        object_maps[:, :, :, :2] = torch.tensor(grid_map)
+        object_maps[:, :, :, :2] = torch.tensor(grid_map[:, :, :, :2])
+        object_maps[:, :, :, 4] = torch.tensor(grid_map[:, :, :, 2])
         
-        return object_maps, _agent_locs
+        # if 2 in np.unique(semantic[:,:,:,0]): # and 6 not in np.unique(grid_map[:,:,:,1]):
+        #     print('Hold...')
+        
+        return object_maps, _agent_locs, semantic, pred_ious
     
     def _unproject_to_world(self, depth, location, theta):
         point_cloud = du.get_point_cloud_from_z(depth, self.camera)
@@ -1705,6 +2017,32 @@ class SemMapOnTrainer(BaseRLTrainer):
         return geocentric_pc
     
     def _add_to_map(self, coords, semantic, grid_map):
+        XYZS = np.concatenate((coords, semantic),axis=-1)
+        sem_map_counts, sem_map_score_counts = du.project_sem_w_scores(
+            XYZS,
+            self.map_grid_size,
+            self.z_bins,
+            self.map_resolution,
+            self.map_center)
+
+        # map = grid_map[:, :, :, 0] + depth_counts[:, :, :, 1]
+        # map[map < 1] = 0.0
+        # map[map >= 1] = 1.0
+        # grid_map[:, :, :, 0] = map
+        
+        # grid_map[:, :, :, 1] = np.maximum(grid_map[:, :, :, 1], sem_map_counts)
+        # grid_map[:, :, :, 1][grid_map[:, :, :, 1]==0] = sem_map_counts
+        
+        # Merge map based on scores
+        replace_mask = sem_map_score_counts > grid_map[:, :, :, 2]
+        grid_map[:, :, :, 2][replace_mask==True]=sem_map_score_counts[replace_mask==True]
+        grid_map[:, :, :, 1][replace_mask==True]=sem_map_counts[replace_mask==True]
+        # grid_map[:, :, :, 1] = np.maximum(grid_map[:, :, :, 1], sem_map_counts[:, :, :, 1])
+        #grid_map[:, :, :, 1] = sem_map_counts[:, :, :, 1]
+
+        return grid_map
+    
+    def _add_to_map_v0(self, coords, semantic, grid_map):
         XYZS = np.concatenate((coords, semantic),axis=-1)
         depth_counts, sem_map_counts = du.bin_points_w_sem(
             XYZS,
@@ -1730,3 +2068,60 @@ class SemMapOnTrainer(BaseRLTrainer):
             (grid_x - self.map_center[0]) * self.map_resolution,
             (grid_y - self.map_center[1]) * self.map_resolution,
             ]
+    
+    def findFrontier(self, mat, agent_pos_loc, agent_angle):
+        # Select unexplored area
+        frontier_map = mat == 0
+
+        dilation_size = (self.config.habitat_baselines.rl.policy.frontier_dilation_size 
+                         if "frontier_dilation_size" in self.config.habitat_baselines.rl.policy
+                         else 10)
+
+        # Dilate explored area
+        frontier_map = 1 - skimage.morphology.binary_dilation(
+            1 - frontier_map, skimage.morphology.disk(dilation_size)
+        ).astype(int)
+
+        # Select the frontier
+        frontier_map = (
+            skimage.morphology.binary_dilation(
+                frontier_map, skimage.morphology.disk(1)
+            ).astype(int)
+            - frontier_map
+        )
+
+        # Select the intersection between the frontier and the
+        # direction of the object beyond the maximum depth
+
+        # TODO Make this adaptive
+        # map_size = self.map_grid_size  # 480
+        # hfov = self.config.TASK_CONFIG.SIMULATOR.DEPTH_SENSOR.HFOV #42
+        # frame_width = self.config.TASK_CONFIG.SIMULATOR.DEPTH_SENSOR.WIDTH #480
+
+        # start_x, start_y = agent_pos_loc
+                                
+        # line_length = map_size
+        # # median_col = np.median(np.nonzero(cat_frame)[1])
+        # # frame_angle = np.deg2rad(median_col / frame_width * hfov - hfov / 2)
+        # angle = agent_angle #+ frame_angle
+
+        # end_y = start_y + line_length * math.sin(angle)
+        # end_x = start_x + line_length * math.cos(angle)
+        # direction_map = np.zeros((map_size, map_size))
+        # self.draw_line((start_x, start_y), (end_x, end_y), direction_map, steps=line_length)
+        # direction_frontier_map = frontier_map * direction_map
+        # goal_map = direction_frontier_map
+
+        frontier_locs = np.transpose(np.nonzero(frontier_map))
+
+        return frontier_locs, frontier_map
+    
+    def draw_line(self, start, end, mat, steps=25, w=1):
+        max_r, max_c = mat.shape
+        start = (np.clip(start[0], 0, max_r), np.clip(start[1], 0, max_c))
+        end = (np.clip(end[0], 0, max_r), np.clip(end[1], 0, max_c))
+        for i in range(steps + 1):
+            r = int(np.rint(start[0] + (end[0] - start[0]) * i / steps))
+            c = int(np.rint(start[1] + (end[1] - start[1]) * i / steps))
+            mat[r - w : r + w, c - w : c + w] = 1
+        return mat

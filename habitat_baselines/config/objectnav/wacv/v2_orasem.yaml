@@ -1,0 +1,134 @@
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_hm3d.yaml"
+CMD_TRAILING_OPTS: ["TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS", "50000"]
+ENV_NAME: "NavRLEnv"
+SIMULATOR_GPU_ID: 0
+TORCH_GPU_ID: 0
+VIDEO_OPTION: ["disk"]
+VIDEO_RENDER_ALL_INFO: True
+TENSORBOARD_DIR: "experiments/wacv/v2/orasem/debug/tb"
+VIDEO_DIR: "experiments/wacv/v2/orasem/debug/video_dir"
+RESULTS_DIR: "experiments/wacv/v2/orasem/debug/results"
+TEST_EPISODE_COUNT: 1
+EVAL_CKPT_PATH_DIR: "data/pretrained_models/hm3d_ddppo_pointnav_baselines_v1/mp3d-depth/ckpt.60.pth"
+NUM_ENVIRONMENTS: 1
+CHECKPOINT_FOLDER: "experiments/wacv/v2/orasem/debug/new_checkpoints"
+TRAINER_NAME: "semmapon"
+SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR", "SEMANTIC_SENSOR"]
+NUM_UPDATES: 270000
+LOG_INTERVAL: 100
+NUM_CHECKPOINTS: 100
+# Force PyTorch to be single threaded as
+# this improves performance considerably
+FORCE_TORCH_SINGLE_THREADED: True
+
+EVAL:
+  SPLIT: "val"
+  SHOULD_LOAD_CKPT: True
+  USE_CKPT_CONFIG: False
+
+IL:
+  RedNet:
+    arch: "rednet"
+    resnet_pretrained: True
+    n_classes: 13
+    epochs: 50
+    batch_size: 20
+    workers: 4
+    lr: 3e-4
+    lr_decay_rate: 0.8
+    lr_epoch_per_decay: 100
+    weight_decay: 1e-4
+    momentum: 0.9
+    freeze_encoder: False
+    training_data: ""
+    last_ckpt: "data/pretrained_models/sem_seg/detic/custom_vocab/wo_mean_selection/w_tv_mp3d_best_model.pkl"
+    start_epoch: 5
+    save_epoch_freq: 5
+    print_freq: 200
+
+RL:
+  SUCCESS_REWARD: 2.5
+  SLACK_REWARD: -1e-3
+
+  SEM_MAP_POLICY:
+    use_oracle_map: False
+    map_size: 50
+    MAP_CHANNELS: 5
+    global_map_size: 100
+    local_map_size: 150
+    coordinate_min: -62.3241
+    coordinate_max: 90.0399
+    #meters_per_pixel: 0.3
+    object_padding: 1
+    object_ind_offset: 1
+    use_local_map: False
+    use_world_loc: True
+    map_resolution: 0.2
+    meters_covered: 100
+    grid_stop_distance: 0.6
+    grid_stop_distance_flag: False
+    goal_select_first_goal: False
+    metadata_classes: ['others', 
+                        'chair', 'table', 'picture', 'cabinet', 'cushion', 
+                        'sofa', 'bed', 'chest of drawers', 'plant', 'sink', 
+                        'toilet', 'stool', 'towel', 'tv monitor', 'shower', 
+                        'bathtub', 'counter', 'fireplace', 'gym equipment', 'seating', 
+                        'clothes']
+
+  POLICY:
+    name: "PointNavResNetPolicy"
+    EXPLORATION_STRATEGY: "random"  # can be one of ["random", "stubborn"]
+    EXPLORE_RADIUS: 50
+    MAX_STEPS_BEFORE_GOAL_SELECTION: 20
+    global_map_size: 250
+    USE_LOCAL_MAP_FOR_STUBBORN: True
+    local_map_size: 15
+    collision_threshold: 5
+    has_rgb: True
+
+  PPO:
+    # ppo params
+    clip_param: 0.2
+    ppo_epoch: 2
+    num_mini_batch: 2
+    value_loss_coef: 0.5
+    entropy_coef: 0.01
+    lr: 2.5e-4
+    eps: 1e-5
+    max_grad_norm: 0.2
+    num_steps: 128
+    use_gae: True
+    gamma: 0.99
+    tau: 0.95
+    use_linear_clip_decay: False
+    use_linear_lr_decay: False
+    reward_window_size: 50
+
+    use_normalized_advantage: False
+
+    hidden_size: 512
+
+    # Use double buffered sampling, typically helps
+    # when environment time is similar or large than
+    # policy inference time during rollout generation
+    use_double_buffered_sampler: False
+
+  DDPPO:
+    sync_frac: 0.6
+    # The PyTorch distributed backend to use
+    distrib_backend: NCCL
+    # Visual encoder backbone
+    pretrained_weights: data/pretrained_models/hm3d_ddppo_pointnav_baselines_v1/mp3d-depth/ckpt.60.pth  #gibson-2plus-resnet50.pth
+    # Initialize with pretrained weights
+    pretrained: False
+    # Initialize just the visual encoder backbone with pretrained weights
+    pretrained_encoder: False
+    # Whether or not the visual encoder backbone will be trained.
+    train_encoder: True
+    # Whether or not to reset the critic linear layer
+    reset_critic: True
+
+    # Model parameters
+    backbone: resnet50
+    rnn_type: LSTM
+    num_recurrent_layers: 2

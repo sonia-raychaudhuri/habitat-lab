@@ -47,7 +47,7 @@ _C.ENVIRONMENT.ITERATOR_OPTIONS.STEP_REPETITION_RANGE = 0.2
 # -----------------------------------------------------------------------------
 _C.TASK = CN()
 _C.TASK.TYPE = "Nav-v0"
-_C.TASK.SENSORS = []
+_C.TASK.SENSORS = ['RGB_SENSOR', 'DEPTH_SENSOR', 'SEMANTIC_SENSOR'] #[]
 _C.TASK.MEASUREMENTS = []
 _C.TASK.GOAL_SENSOR_UUID = "pointgoal"
 _C.TASK.POSSIBLE_ACTIONS = ["STOP", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
@@ -151,6 +151,7 @@ _C.TASK.OBJECT_MAP_SENSOR.VISIBILITY_DIST = 5.0
 _C.TASK.OBJECT_MAP_SENSOR.FOV = 80
 _C.TASK.OBJECT_MAP_SENSOR.object_padding = 2
 _C.TASK.OBJECT_MAP_SENSOR.object_ind_offset = 2
+_C.TASK.OBJECT_MAP_SENSOR.is_chal_21 = False
 # -----------------------------------------------------------------------------
 # Oracle Map Size SENSOR
 # -----------------------------------------------------------------------------

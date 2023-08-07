@@ -78,6 +78,15 @@ target/
 
 # exclude data from source control by default
 data
+experiments
+tb
+Detic
+debug
+models
+test_images
+
+*.jpg
+*.txt
 
 # Mac OS-specific storage files
 .DS_Store

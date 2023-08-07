@@ -15,7 +15,7 @@ import torch
 from einops import rearrange
 import math
 import torch.nn.functional as F
-import torch_scatter
+# import torch_scatter
 
 from habitat.core.logging import logger
 from habitat.core.utils import try_cv2_import
@@ -422,7 +422,7 @@ def observations_to_image(observation: Dict, projected_features: np.ndarray=None
         
     if predicted_semantic is not None:
         observation_size = predicted_semantic.shape[0]
-        predicted_semantic = predicted_semantic.squeeze(-1)
+        # predicted_semantic = predicted_semantic.squeeze(-1)
         if not isinstance(predicted_semantic, np.ndarray):
             predicted_semantic = predicted_semantic.cpu().numpy()
 
@@ -466,7 +466,7 @@ def observations_to_image(observation: Dict, projected_features: np.ndarray=None
             
         # objects
         object_map[:,:,1] = object_map[:,:,1] + 1
-        obj_map = (object_map[:,:,1:].max(axis=-1)).astype(np.uint8)
+        obj_map = (object_map[:,:,1:4].max(axis=-1)).astype(np.uint8)
         obj_map = multion_maps.OBJECT_MAP_COLORS[obj_map]
         
         # scale map to align with rgb view

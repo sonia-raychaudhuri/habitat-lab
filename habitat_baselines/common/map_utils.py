@@ -21,6 +21,18 @@ except ImportError:
 OBJNAV_CATEGORY = {'background':0, 'chair': 1, 'bed': 2, 'plant': 3, 'toilet': 4, 'tv_monitor': 5, 'sofa': 6}
 OBJNAV_CATEGORY_MAP = dict((v,k) for k,v in OBJNAV_CATEGORY.items())
 
+OBJNAV_21_CATEGORY = {'background':0, 
+                      'chair': 1, 'table': 2, 'picture': 3, 'cabinet': 4, 'cushion': 5, 
+                      'sofa': 6, 'bed': 7, 'chest_of_drawers': 8, 'plant': 9, 'sink': 10, 
+                      'toilet': 11, 'stool': 12, 'towel': 13, 'tv_monitor': 14, 'shower': 15, 
+                      'bathtub': 16, 'counter': 17, 'fireplace': 18, 'gym_equipment': 19, 'seating': 20, 
+                      'clothes': 21}
+OBJNAV_21_CATEGORY_MAP = dict((v,k) for k,v in OBJNAV_21_CATEGORY.items())
+
+OBJNAV_CATEGORY_12_TO_21 = np.array([
+    0,8,7,5,18,6,2,1,4,9,17,10
+])
+
 OBJNAV_CATEGORY_12_TO_6 = np.array([
     0,0,0,2,6,0,6,1,1,5,3,0,4
 ])

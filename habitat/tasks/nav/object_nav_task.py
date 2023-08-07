@@ -27,6 +27,8 @@ from habitat.tasks.utils import cartesian_to_polar
 from habitat.utils.visualizations import maps, fog_of_war
 # import habitat_baselines.common.map_utils
 import quaternion
+from PIL import Image
+import time
 
 try:
     from habitat.datasets.object_nav.object_nav_dataset import (
@@ -310,7 +312,16 @@ class ObjectMapSensor(Sensor):
         self.object_ind_offset = config.object_ind_offset
         self.channel_num = 1
         self.object_padding = config.object_padding
-        self.object_to_datset_mapping = {'chair': 0, 'bed': 1, 'plant': 2, 'toilet': 3, 'tv_monitor': 4, 'sofa': 5}
+        
+        self.is_chal_21 = config.is_chal_21
+        if self.is_chal_21:
+            self.object_to_datset_mapping = {'chair': 0, 'table': 1, 'picture': 2, 'cabinet': 3, 'cushion': 4, 
+                                         'sofa': 5, 'bed': 6, 'chest_of_drawers': 7, 'plant': 8, 'sink': 9, 
+                                         'toilet': 10, 'stool': 11, 'towel': 12, 'tv_monitor': 13, 'shower': 14, 
+                                         'bathtub': 15, 'counter': 16, 'fireplace': 17, 'gym_equipment': 18, 'seating': 19, 
+                                         'clothes': 20}
+        else:
+            self.object_to_datset_mapping = {'chair': 0, 'bed': 1, 'plant': 2, 'toilet': 3, 'tv_monitor': 4, 'sofa': 5}
         
         super().__init__(config=config)
 
@@ -563,9 +574,29 @@ class ObjectNavSemanticSensor(Sensor):
         self._sim = sim
         self.height = 256
         self.width = 256
-        self.object_to_datset_mapping = {'chair': 1, 'bed': 2, 'plant': 3, 
+        self.chal_version = 'v2' #'v1'
+        
+        if self.chal_version == 'v1':
+            self.object_to_datset_mapping = {'chair': 1, 'table': 2, 'picture': 3, 'cabinet': 4, 'cushion': 5, 
+                                            'sofa': 6, 'bed': 7, 'chest_of_drawers': 8, 'plant': 9, 'sink': 10, 
+                                            'toilet': 11, 'stool': 12, 'towel': 13, 'tv_monitor': 14, 'shower': 15, 
+                                            'bathtub': 16, 'counter': 17, 'fireplace': 18, 'gym_equipment': 19, 'seating': 20, 
+                                            'clothes': 21}
+            self.category_to_mp3d_category_id = {'chair': 3, 'table': 5, 'picture': 6, 'cabinet': 7, 'cushion': 8,
+                                                 'sofa': 10, 'bed': 11, 'chest_of_drawers': 13, 'plant': 14, 'sink': 15,
+                                                 'toilet': 18, 'stool': 19, 'towel': 20, 'tv_monitor': 22, 
+                                                 'shower': 23, 'bathtub': 25, 'counter': 26, 'fireplace': 27, 
+                                                 'gym_equipment': 33, 'seating': 34, 'clothes': 38}
+            self.category_to_task_category_id = {'chair': 0, 'table': 1, 'picture': 2, 'cabinet': 3, 'cushion': 4, 
+                                                 'sofa': 5, 'bed': 6, 'chest_of_drawers': 7, 'plant': 8, 'sink': 9, 
+                                                 'toilet': 10, 'stool': 11, 'towel': 12, 'tv_monitor': 13, 
+                                                 'shower': 14, 'bathtub': 15, 'counter': 16, 'fireplace': 17, 
+                                                 'gym_equipment': 18, 'seating': 19, 'clothes': 20}
+        else:
+            self.object_to_datset_mapping = {'chair': 1, 'bed': 2, 'plant': 3, 
                                          'toilet': 4, 'tv_monitor': 5, 'sofa': 6,
                                          'tv': 5, 'monitor': 5, 'couch': 6}
+            
         
         super().__init__(config=config)
 
@@ -590,7 +621,7 @@ class ObjectNavSemanticSensor(Sensor):
         instance_id_to_label_id = {int(obj.id.split("_")[-1]): obj.category.index() for obj in scene.objects}
         instance_id_to_label_names = {int(obj.id.split("_")[-1]): obj.category.name() for obj in scene.objects}
         
-        semantic_obs = observations['semantic']
+        semantic_obs = np.array(observations['semantic']).astype(np.uint8).squeeze(-1)
         
         # instance id to MP3D category id
         # semantic_obs_transformed = np.array(
@@ -603,8 +634,15 @@ class ObjectNavSemanticSensor(Sensor):
                                         if instance_id_to_label_names[s] in self.object_to_datset_mapping
                                         else 0
                                      for s in semantic_obs.reshape(-1)]
-                                ).reshape(semantic_obs.shape)
+                                ).reshape(semantic_obs.shape).astype(np.uint8)
         
+        ## debug
+        # img_folder = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/test_images/hm3d'
+        # file_id = str(time.time())
+        # rgb_obs = np.array(observations['rgb'])
+        # Image.fromarray(rgb_obs).save(os.path.join(img_folder, f'{file_id}_rgb.jpg'))
+        # Image.fromarray(maps.TOP_DOWN_MAP_COLORS[semantic_obs]).save(os.path.join(img_folder, f'{file_id}_sem.jpg'))
+        # Image.fromarray(maps.TOP_DOWN_MAP_COLORS[semantic_transformed]).save(os.path.join(img_folder, f'{file_id}_sem_transformed.jpg'))
 
         return semantic_transformed
 

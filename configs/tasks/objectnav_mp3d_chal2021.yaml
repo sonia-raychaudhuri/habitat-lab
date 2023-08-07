@@ -56,7 +56,7 @@ TASK:
   GOAL_SENSOR_UUID: objectgoal
 
   OBJECT_MAP_SENSOR:
-    is_chal_21: False
+    is_chal_21: True
     meters_per_pixel: 0.2
     map_size: 500
     mask_map: True
@@ -64,8 +64,8 @@ TASK:
     object_ind_offset: 1
     FOV: 79
 
-  MEASUREMENTS: ['DISTANCE_TO_GOAL', 'SUCCESS', 'SPL', 'SOFT_SPL', 'EPISODE_LENGTH', 
-                  'EUC_DISTANCE_TO_GOAL', 'EUC_DISTANCE_TO_VP', 'PIXEL_COV_OF_GOAL', 'EUC_DISTANCE_TO_GOAL_OBB']
+  MEASUREMENTS: ['DISTANCE_TO_GOAL', 'SUCCESS', 'SPL', 'SOFT_SPL', 'EPISODE_LENGTH'] 
+                  # ,'EUC_DISTANCE_TO_GOAL', 'EUC_DISTANCE_TO_VP', 'PIXEL_COV_OF_GOAL', 'EUC_DISTANCE_TO_GOAL_OBB']
 
   DISTANCE_TO_GOAL:
     DISTANCE_TO: VIEW_POINTS
@@ -75,6 +75,6 @@ TASK:
 DATASET:
   TYPE: ObjectNav-v1
   SPLIT: train
-  DATA_PATH: "data/datasets/objectnav/hm3d/v1/{split}/{split}.json.gz"
+  DATA_PATH: "data/datasets/objectnav/mp3d/{split}/{split}.json.gz"
   SCENES_DIR: "data/scene_datasets/"
   # CONTENT_SCENES: ["5cdEh9F2hJL"]
