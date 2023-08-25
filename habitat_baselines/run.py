@@ -20,7 +20,8 @@ from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_detic import PredSemMapDe
 from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_detic_chal2021 import PredSemMapDeticChal2021OnTrainer
 from habitat_baselines.rl.ppo.ppo_trainer_orasem_chal2021 import OraSemChal2021OnTrainer
 from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_chal2021_rednet import PredSemMapRedNetChal2021OnTrainer
-
+from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_home_robot import PredSemHomeRobotTrainer
+from habitat_baselines.rl.ppo.ppo_trainer_pred_sem_map_semexp_modular import PredSemSemExpModularTrainer
 
 def main():
     parser = argparse.ArgumentParser()

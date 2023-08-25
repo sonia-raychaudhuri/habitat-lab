@@ -1,16 +1,16 @@
-BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_mp3d_chal2021.yaml"
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_mp3d_chal2021_orasem.yaml"
 CMD_TRAILING_OPTS: ["TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS", "50000"]
 ENV_NAME: "NavRLEnv"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
-VIDEO_OPTION: ["disk"]
+VIDEO_OPTION: []
 VIDEO_RENDER_ALL_INFO: True
 TENSORBOARD_DIR: "experiments/wacv/v1/orasem/debug/tb"
 VIDEO_DIR: "experiments/wacv/v1/orasem/debug/video_dir"
 RESULTS_DIR: "experiments/wacv/v1/orasem/debug/results"
-TEST_EPISODE_COUNT: 1
+TEST_EPISODE_COUNT: -1
 EVAL_CKPT_PATH_DIR: "data/pretrained_models/hm3d_ddppo_pointnav_baselines_v1/mp3d-depth/ckpt.60.pth"
-NUM_ENVIRONMENTS: 1
+NUM_ENVIRONMENTS: 4
 CHECKPOINT_FOLDER: "experiments/wacv/v1/orasem/debug/new_checkpoints"
 TRAINER_NAME: "semmapon2021"
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR", "SEMANTIC_SENSOR"]
@@ -53,7 +53,7 @@ RL:
   SEM_MAP_POLICY:
     use_oracle_map: False
     map_size: 50
-    MAP_CHANNELS: 5
+    MAP_CHANNELS: 4
     global_map_size: 100
     local_map_size: 150
     coordinate_min: -62.3241
@@ -63,17 +63,17 @@ RL:
     object_ind_offset: 1
     use_local_map: False
     use_world_loc: True
-    map_resolution: 0.2
-    meters_covered: 100
-    grid_stop_distance: 0.6
-    grid_stop_distance_flag: False
-    goal_select_first_goal: False
-    metadata_classes: ['others', 
-                        'chair', 'table', 'picture', 'cabinet', 'cushion', 
-                        'sofa', 'bed', 'chest of drawers', 'plant', 'sink', 
-                        'toilet', 'stool', 'towel', 'tv monitor', 'shower', 
-                        'bathtub', 'counter', 'fireplace', 'gym equipment', 'seating', 
-                        'clothes']
+    map_resolution: 0.5
+    meters_covered: 50
+    grid_stop_distance: 0.9
+    grid_stop_distance_flag: True
+    # goal_select_first_goal: False
+    # metadata_classes: ['others', 
+    #                     'chair', 'table', 'picture', 'cabinet', 'cushion', 
+    #                     'sofa', 'bed', 'chest of drawers', 'plant', 'sink', 
+    #                     'toilet', 'stool', 'towel', 'tv monitor', 'shower', 
+    #                     'bathtub', 'counter', 'fireplace', 'gym equipment', 'seating', 
+    #                     'clothes']
 
   POLICY:
     name: "PointNavResNetPolicy"

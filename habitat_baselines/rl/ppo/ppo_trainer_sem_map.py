@@ -1150,7 +1150,7 @@ class SemMapOnTrainer(BaseRLTrainer):
         #   [elevation+slice_range_below, elevation+slice_range_above]
         self.slice_range_below = -1 # Should be 0 or negative
         self.slice_range_above = 10.5 # Should be 0 or positive
-        self.z_bins = [0.05, 3.5]
+        self.z_bins = [0.0, 10.5]
         
         ##
         
@@ -1191,9 +1191,10 @@ class SemMapOnTrainer(BaseRLTrainer):
         os.makedirs(results_dir, exist_ok=True)
         _creation_timestamp = str(time.time())
         with open(os.path.join(results_dir, f"stats_all_{_creation_timestamp}.csv"), 'a') as f:
-            csv_header = ['episode_id','reward', 'total_area', 'covered_area', 'covered_area_ratio', 'distance_to_goal', 
-                            'success', 'spl', 'softspl', 'episode_length', 'euc_distance_to_goal', 
-                            'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb']
+            csv_header = ['episode_id','reward', 'total_area', 'covered_area', 'covered_area_ratio', 
+                          'distance_to_goal', 'success', 'spl', 'softspl', 'episode_length', 
+                          'euc_distance_to_goal', 'euc_distance_to_view_points', 'pixel_cov_of_goal', 
+                          'euc_distance_to_goal_obb']
             _csv_writer = csv.writer(f)
             _csv_writer.writerow(csv_header)
 
@@ -1326,7 +1327,11 @@ class SemMapOnTrainer(BaseRLTrainer):
                         is_goal[i] = 1
                         # goal_grid_loc = goal_grid_loc.float().mean(axis=0).type(torch.uint8)  # select one
                         # goal_grid_loc = random.choice(goal_grid_loc)  # select any one
-                        goal_grid_loc = goal_grid_loc[0].type(torch.uint8)
+                        
+                        if len(goal_grid_loc) == 1 or self.config.RL.SEM_MAP_POLICY.goal_select_first_goal:
+                            goal_grid_loc = goal_grid_loc[0].type(torch.uint8)
+                        else:
+                            goal_grid_loc = goal_grid_loc.float().mean(axis=0).type(torch.uint8)  # select one
                     
                     goal_grid[i] = goal_grid_loc
                     
@@ -1347,7 +1352,7 @@ class SemMapOnTrainer(BaseRLTrainer):
                             int(max(0, goal_grid_loc[0]-self.config.RL.SEM_MAP_POLICY.object_padding)): int(min(oracle_map_size[i][0][0], goal_grid_loc[0]+self.config.RL.SEM_MAP_POLICY.object_padding)), 
                             int(max(0, goal_grid_loc[1]-self.config.RL.SEM_MAP_POLICY.object_padding)): int(min(oracle_map_size[i][0][1], goal_grid_loc[1]+self.config.RL.SEM_MAP_POLICY.object_padding)), 
                             3] = 11  # num of objects=8, agent marked as 10
-                if is_goal[i] == 0:
+                if is_goal[i].item() == 0:
                     steps_towards_short_term_goal[i] += 1
                 
                 # 4) Convert 3D world positions to polar coordinates
@@ -1389,22 +1394,22 @@ class SemMapOnTrainer(BaseRLTrainer):
                     deterministic=False,
                 )
 
-                prev_actions.copy_(actions)  # type: ignore
-                
             # Check if the agent is sufficiently close to the goal - then Stop
-            for i in range(self.envs.num_envs):
-                if is_goal[i] == 1:
-                    # get agent location on the map
-                    agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
-                    if len(agent_grid_loc) > 0:
-                        agent_grid_loc = agent_grid_loc[0]
-                    else:
-                        agent_grid_loc = [0, 0]
-                    if ((np.linalg.norm(
-                        goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
-                            ord=2) * self.map_resolution) < 1.0):
-                        actions[i] = 0
-            
+            if self.config.RL.SEM_MAP_POLICY.grid_stop_distance_flag:
+                for i in range(self.envs.num_envs):
+                    if is_goal[i].item() == 1:
+                        # get agent location on the map
+                        agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
+                        if len(agent_grid_loc) > 0:
+                            agent_grid_loc = agent_grid_loc[0]
+                        else:
+                            agent_grid_loc = torch.tensor([0, 0])
+                        if ((np.linalg.norm(
+                            goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
+                                ord=2) * self.map_resolution) < self.config.RL.SEM_MAP_POLICY.grid_stop_distance):
+                            actions[i] = 0
+                            
+            prev_actions.copy_(actions)  # type: ignore
             # NB: Move actions to CPU.  If CUDA tensors are
             # sent in to env.step(), that will create CUDA contexts
             # in the subprocesses.
@@ -1593,7 +1598,7 @@ class SemMapOnTrainer(BaseRLTrainer):
                         collision_threshold_steps[i] = 0
 
                     if ((actions[i].item() == 0 and infos[i]["success"] == 1) or
-                            is_goal[i] == 0 and (
+                            is_goal[i].item() == 0 and (
                             ((self.config.RL.POLICY.EXPLORATION_STRATEGY == "" or self.config.RL.POLICY.EXPLORATION_STRATEGY == "random") 
                                 and steps_towards_short_term_goal[i].item() >= self.config.RL.POLICY.MAX_STEPS_BEFORE_GOAL_SELECTION) or
                             (self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn" and 

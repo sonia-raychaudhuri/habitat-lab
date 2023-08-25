@@ -637,7 +637,7 @@ class ObjectNavSemanticSensor(Sensor):
                                 ).reshape(semantic_obs.shape).astype(np.uint8)
         
         ## debug
-        # img_folder = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/test_images/hm3d'
+        # img_folder = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/test_images/mp3d'
         # file_id = str(time.time())
         # rgb_obs = np.array(observations['rgb'])
         # Image.fromarray(rgb_obs).save(os.path.join(img_folder, f'{file_id}_rgb.jpg'))

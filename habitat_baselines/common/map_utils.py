@@ -30,7 +30,7 @@ OBJNAV_21_CATEGORY = {'background':0,
 OBJNAV_21_CATEGORY_MAP = dict((v,k) for k,v in OBJNAV_21_CATEGORY.items())
 
 OBJNAV_CATEGORY_12_TO_21 = np.array([
-    0,8,7,5,18,6,2,1,4,9,17,10
+    0,0,8,7,5,18,6,2,1,4,9,17,10
 ])
 
 OBJNAV_CATEGORY_12_TO_6 = np.array([
@@ -67,6 +67,55 @@ OBJNAV_CATEGORY_LABEL_COLORS = np.array([[0,0,0],
                  [24, 220, 255], #[56, 173, 169],    # counter
                  [234, 32, 39],  #sink
 ], dtype=np.uint8)
+
+semexp_coco_categories = {
+    "chair": 0,
+    "couch": 1,
+    "potted plant": 2,
+    "bed": 3,
+    "toilet": 4,
+    "tv": 5,
+    "dining-table": 6,
+    "oven": 7,
+    "sink": 8,
+    "refrigerator": 9,
+    "book": 10,
+    "clock": 11,
+    "vase": 12,
+    "cup": 13,
+    "bottle": 14
+}
+
+OBJNAV_CATEGORY_21_TO_SEMEXP_15 = {
+    1: 0, 
+    6: 1, 
+    9: 2, 
+    7: 3, 
+    11: 4, 
+    14: 5, 
+    2: 6, 
+    10: 7,
+    0: 8
+}
+
+OBJNAV_CATEGORY_v2_TO_SEMEXP_15_INDEX_MAP = [1,6,3,2,4,5,0,0,0,0,0,0,0,0,0]
+OBJNAV_CATEGORY_v2_TO_SEMEXP_15 = {
+    1: 0, 
+    6: 1, 
+    3: 2, 
+    2: 3, 
+    4: 4, 
+    5: 5, 
+    0: 6, 
+    0: 7,
+    0: 8,
+    0: 9,
+    0: 10,
+    0: 11,
+    0: 12,
+    0: 13,
+    0: 14
+}
 
 # Multion Objects
 MULTION_CYL_OBJECT_CATEGORY = {'cylinder_red':1, 'cylinder_green':2, 'cylinder_blue':3, 'cylinder_yellow':4, 

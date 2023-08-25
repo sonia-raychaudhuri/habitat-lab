@@ -1,17 +1,17 @@
-BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_hm3d.yaml"
+BASE_TASK_CONFIG_PATH: "configs/tasks/objectnav_hm3d_v2_orasem.yaml"
 CMD_TRAILING_OPTS: ["TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS", "50000"]
 ENV_NAME: "NavRLEnv"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
-VIDEO_OPTION: ["disk"]
+VIDEO_OPTION: []
 VIDEO_RENDER_ALL_INFO: True
-TENSORBOARD_DIR: "experiments/wacv/v2/orasem/debug/tb"
-VIDEO_DIR: "experiments/wacv/v2/orasem/debug/video_dir"
-RESULTS_DIR: "experiments/wacv/v2/orasem/debug/results"
-TEST_EPISODE_COUNT: 1
+TENSORBOARD_DIR: "experiments/wacv/v2/hm3d_v2/orasem/no_stop/tb"
+VIDEO_DIR: "experiments/wacv/v2/hm3d_v2/orasem/no_stop/video_dir"
+RESULTS_DIR: "experiments/wacv/v2/hm3d_v2/orasem/no_stop/results"
+TEST_EPISODE_COUNT: -1
 EVAL_CKPT_PATH_DIR: "data/pretrained_models/hm3d_ddppo_pointnav_baselines_v1/mp3d-depth/ckpt.60.pth"
 NUM_ENVIRONMENTS: 1
-CHECKPOINT_FOLDER: "experiments/wacv/v2/orasem/debug/new_checkpoints"
+CHECKPOINT_FOLDER: "experiments/wacv/v2/hm3d_v2/orasem/no_stop/new_checkpoints"
 TRAINER_NAME: "semmapon"
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR", "SEMANTIC_SENSOR"]
 NUM_UPDATES: 270000
@@ -64,20 +64,14 @@ RL:
     use_local_map: False
     use_world_loc: True
     map_resolution: 0.2
-    meters_covered: 100
-    grid_stop_distance: 0.6
+    meters_covered: 50
+    grid_stop_distance: 0.9
     grid_stop_distance_flag: False
-    goal_select_first_goal: False
-    metadata_classes: ['others', 
-                        'chair', 'table', 'picture', 'cabinet', 'cushion', 
-                        'sofa', 'bed', 'chest of drawers', 'plant', 'sink', 
-                        'toilet', 'stool', 'towel', 'tv monitor', 'shower', 
-                        'bathtub', 'counter', 'fireplace', 'gym equipment', 'seating', 
-                        'clothes']
+    goal_select_first_goal: True
 
   POLICY:
     name: "PointNavResNetPolicy"
-    EXPLORATION_STRATEGY: "random"  # can be one of ["random", "stubborn"]
+    EXPLORATION_STRATEGY: "random"  # can be one of ["random", "stubborn", "frontier", "ans_gpolicy", "sem_exp"]
     EXPLORE_RADIUS: 50
     MAX_STEPS_BEFORE_GOAL_SELECTION: 20
     global_map_size: 250
@@ -85,6 +79,14 @@ RL:
     local_map_size: 15
     collision_threshold: 5
     has_rgb: True
+    frontier_nearest_select: True
+    frontier_nearest_select_dist: 15
+    frontier_dilation_size: 10
+    ans_gpolicy_checkpoint: "/localhome/sraychau/Projects/Research/MultiON/codebase/multi-obj-nav/data/pretrained_models/learned_exp_ans/model_best.global"
+    ans_downscaling: 1
+    semexp_checkpoint: "/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/data/pretrained_models/semexp/sem_exp.pth"
+    semexp_downscaling: 1
+    semexp_num_sem_categories: 16
 
   PPO:
     # ppo params

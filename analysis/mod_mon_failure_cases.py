@@ -17,13 +17,24 @@ def main():
     ######### PredSem
     ############### RedNet
     # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/pointnav/hm3d-depth/objnav/predsem/rednet/results/val/stats_all_1677991890.9602792.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/predsem/rednet/map_res_0.5/results/val/stats_all_1691462494.552468.csv'
     
     ############### Detic
-    file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/iccv_rebuttal/detic/val_split/res_0.2/results/val/stats_all_1685047860.8896706.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/iccv_rebuttal/detic/val_split/res_0.2/results/val/stats_all_1685047860.8896706.csv'
     
     ##### V1 2021
+    ########## OraSem
+    ############### +SemExp
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v1/orasem/semexp/results/val/stats_all_1691628563.9681735.csv'
+    
+    ########## RedNet
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v1/predsem/rednet/map_res_0.5/results/val/stats_all_1691457647.3578885.csv'
+    
+    ########## Detic
     # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/iccv_rebuttal/chal2021/detic/val_split/grid_sd_0.5/res_0.2/results/val/stats_all_1685047213.342055.csv'
     
+    ########## RedNet + ANS global policy
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v1/orasem/activeneural/results/val/stats_all_1691614585.5868964.csv'
     
     # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/pointnav/hm3d-depth/objnav/predsem/rednet/results/val/stats_all_1677982394.5326731.csv'
     # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/pointnav/hm3d-depth/objnav/predsem/rednet/results/val/stats_all_1678029447.286416.csv'
@@ -60,7 +71,43 @@ def main():
     # Stubborn
     # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/pointnav/hm3d-depth/objnav/analysis/stubborn/val/results/val/stats_all_1678247567.7356858.csv'
     
-    df = pd.read_csv(file_name, sep=",", header=0, index_col=False)
+    ###### HM3D_0.2 v2
+    #### orasem
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/orasem/objnav_v2.0/results/val/stats_all_1691776677.1554513.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/orasem/objnav_v2.0/results/val/stats_all_1691781289.1225533.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/orasem/objnav_v2.0/not_first_goal/height_0.88/results/val/stats_all_1691797364.2024558.csv'
+    
+    #### detic + semexp
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/onav_v2/predsem/semexp/results/val/stats_all_1691777184.8791404.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/orasem/objnav_v2.0/not_first_goal/results/val/stats_all_1691796458.2587438.csv'
+    
+    ###### HM3D_0.2 v3
+    #### orasem
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/orasem/results/val/stats_all_1691723980.6529274.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/orasem/stop_0.9/results/val/stats_all_1691774504.217546.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/orasem/no_stop/results/val/stats_all_1691775604.4173598.csv'
+    
+    ### detic + semexp
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/detic/semexp/results/val/stats_all_1691724160.0760832.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/detic/rand_50/results/val/stats_all_1691771531.320771.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/detic/rand_20/results/val/stats_all_1691774590.1625445.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/detic/random/rgb2bgr/results/val/stats_all_1692240672.7640033.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/detic/random/rgb2bgr/stop_at_0.9/results/val/stats_all_1692241699.3672633.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/home_robot/pointnav/sem_exp/results/val/stats_all_1692223013.0462742.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/detic/random/rgb2bgr/stop_at_0.9/results/val/stats_all_1692250904.564762.csv'
+    
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/home_robot/pointnav/random/results/val/stats_all_1692237672.1742103.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/home_robot/pointnav/random/no_stop/results/val/stats_all_1692239865.4202547.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/home_robot/pointnav/random/stop_at_0.9/results/val/stats_all_1692241585.5051696.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v2/predsem/home_robot/pointnav/sem_exp_policy/stop_at_0.9/results/val/stats_all_1692249511.7795794.csv'
+    
+    file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v1/predsem/detic/random/rgb/results/val/stats_all_1692833666.973552.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v1/predsem/detic/random/rgb/results/val/stats_all_1692834387.3377337.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v1/predsem/detic/random/rgb/results/val/stats_all_1692837896.5190315.csv'
+    # file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v1/predsem/detic/random/rgb/model2/results/val/stats_all_1692847026.1935294.csv'
+    file_name = '/localhome/sraychau/Projects/Research/ObjNav/habitat-lab/experiments/wacv/v2/hm3d_v1/predsem/detic/random/rgb/results/val/stats_all_1692847836.938631.csv'
+    
+    df = pd.read_csv(file_name, sep=",", header=0, index_col=False) #.head(n=21)
     # df = df.head(405)
     print(f"{len(df)} total episodes.")
     # print(df.columns)

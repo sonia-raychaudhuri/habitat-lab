@@ -5,13 +5,13 @@ SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
 VIDEO_OPTION: []
 VIDEO_RENDER_ALL_INFO: True
-TENSORBOARD_DIR: "experiments/wacv/v2/predsem/rednet/tb"
-VIDEO_DIR: "experiments/wacv/v2/predsem/rednet/video_dir"
-RESULTS_DIR: "experiments/wacv/v2/predsem/rednet/results"
+TENSORBOARD_DIR: "experiments/wacv/v2/predsem/rednet/map_res_0.5/tb"
+VIDEO_DIR: "experiments/wacv/v2/predsem/rednet/map_res_0.5/video_dir"
+RESULTS_DIR: "experiments/wacv/v2/predsem/rednet/map_res_0.5/results"
 TEST_EPISODE_COUNT: -1
 EVAL_CKPT_PATH_DIR: "data/pretrained_models/hm3d_ddppo_pointnav_baselines_v1/hm3d-depth/ckpt.60.pth"
-NUM_ENVIRONMENTS: 10
-CHECKPOINT_FOLDER: "experiments/wacv/v2/predsem/rednet/new_checkpoints"
+NUM_ENVIRONMENTS: 1
+CHECKPOINT_FOLDER: "experiments/wacv/v2/predsem/rednet/map_res_0.5/new_checkpoints"
 TRAINER_NAME: "predrednet"
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR", "SEMANTIC_SENSOR"]
 NUM_UPDATES: 270000
@@ -41,7 +41,7 @@ IL:
     momentum: 0.9
     freeze_encoder: False
     training_data: ""
-    last_ckpt: "data/pretrained_models/sem_seg/rednet_mp3d_best_model.pkl"
+    last_ckpt: "data/semseg/rednet/rednet_mp3d_best_model.pkl"
     start_epoch: 5
     save_epoch_freq: 5
     print_freq: 200
@@ -63,8 +63,10 @@ RL:
     object_ind_offset: 1
     use_local_map: False
     use_world_loc: True
-    map_resolution: 0.2
+    map_resolution: 0.5
     meters_covered: 50
+    grid_stop_distance: 0.9
+    grid_stop_distance_flag: True
 
   POLICY:
     name: "PointNavResNetPolicy"

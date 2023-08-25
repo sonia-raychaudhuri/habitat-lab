@@ -81,6 +81,8 @@ import habitat_baselines.common.rotation_utils as ru
 #import habitat_baselines.common.fog_of_war as fog_of_war
 #from habitat_baselines.common.object_detector_cyl import ObjectDetector
 import skimage
+from habitat_baselines.common.ANS_model import RL_Policy
+from habitat_baselines.common.semexp.model import RL_Policy as SemExpRLPolicy
 
 @baseline_registry.register_trainer(name="semmapon2021")
 class OraSemChal2021OnTrainer(BaseRLTrainer):
@@ -1182,6 +1184,92 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
         #_detector = ObjectDetector()
         # self.selem = skimage.morphology.disk(1)
         
+        # ANS Global policy (exploration)
+        if self.config.RL.POLICY.EXPLORATION_STRATEGY == "ans_gpolicy":
+
+            # Global policy observation space
+            self.g_local_w = self.g_local_h =  self.map_grid_size # full map size
+            self.ans_downscaling = self.config.RL.POLICY.ans_downscaling
+            g_observation_space = spaces.Box(0, 1,
+                                                (8,
+                                                self.g_local_w,
+                                                self.g_local_h), dtype='uint8')
+            
+            # Global policy action space
+            g_action_space = spaces.Box(low=0.0, high=1.0,
+                                            shape=(2,), dtype=np.float32)
+            
+            g_policy = RL_Policy(g_observation_space.shape, g_action_space,
+                            base_kwargs={'recurrent': 0,
+                                        'hidden_size': 256,
+                                        'downscaling': self.ans_downscaling
+                                        }).to(self.device)
+            # print("Loading global {}".format(args.load_global))
+            gpolicy_state_dict = torch.load(self.config.RL.POLICY.ans_gpolicy_checkpoint,
+                                    map_location=lambda storage, loc: storage)
+            g_policy.load_state_dict(gpolicy_state_dict)
+            g_policy.eval()
+            
+            gpolicy_rnn_states = torch.zeros(
+                self.config.NUM_ENVIRONMENTS,
+                self.actor_critic.num_recurrent_layers,
+                ppo_cfg.hidden_size,
+                device=self.device,
+            )
+            self.ans_global_map = torch.zeros(
+                self.config.NUM_ENVIRONMENTS,
+                8,
+                self.map_grid_size,
+                self.map_grid_size,
+                device=self.device,
+                dtype=torch.float,
+            )
+            self.ans_global_orientation = torch.zeros(self.config.NUM_ENVIRONMENTS, 1, device=self.device).long()
+            
+        # SemExp Global policy (exploration)
+        if self.config.RL.POLICY.EXPLORATION_STRATEGY == "sem_exp":
+
+            # Global policy observation space
+            self.g_local_w = self.g_local_h =  self.map_grid_size # full map size
+            self.semexp_downscaling = self.config.RL.POLICY.semexp_downscaling
+            self.ngc = 8 + self.config.RL.POLICY.semexp_num_sem_categories
+            g_observation_space = spaces.Box(0, 1,
+                                                (self.ngc,
+                                                self.g_local_w,
+                                                self.g_local_h), dtype='uint8')
+            
+            # Global policy action space
+            g_action_space = spaces.Box(low=0.0, high=0.99,
+                                    shape=(2,), dtype=np.float32)
+
+            g_policy = SemExpRLPolicy(g_observation_space.shape, g_action_space,
+                         model_type=1,
+                         base_kwargs={'recurrent': 0,
+                                      'hidden_size': 256,
+                                      'num_sem_categories': self.ngc - 8
+                                      }).to(self.device)
+            # print("Loading global {}".format(args.load_global))
+            gpolicy_state_dict = torch.load(self.config.RL.POLICY.semexp_checkpoint,
+                                    map_location=lambda storage, loc: storage)
+            g_policy.load_state_dict(gpolicy_state_dict)
+            g_policy.eval()
+            
+            gpolicy_rnn_states = torch.zeros(
+                self.config.NUM_ENVIRONMENTS,
+                self.actor_critic.num_recurrent_layers,
+                ppo_cfg.hidden_size,
+                device=self.device,
+            )
+            self.semexp_global_map = torch.zeros(
+                self.config.NUM_ENVIRONMENTS,
+                self.ngc,
+                self.map_grid_size,
+                self.map_grid_size,
+                device=self.device,
+                dtype=torch.float,
+            )
+            self.semexp_global_orientation = torch.zeros(self.config.NUM_ENVIRONMENTS, 1, device=self.device).long()
+        
         stats_episodes: Dict[
             Any, Any
         ] = {}  # dict of dicts that stores stats per episode
@@ -1191,9 +1279,13 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
         os.makedirs(results_dir, exist_ok=True)
         _creation_timestamp = str(time.time())
         with open(os.path.join(results_dir, f"stats_all_{_creation_timestamp}.csv"), 'a') as f:
-            csv_header = ['episode_id','reward', 'total_area', 'covered_area', 'covered_area_ratio', 'distance_to_goal', 
-                            'success', 'spl', 'softspl', 'episode_length', 'euc_distance_to_goal', 
-                            'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb']
+            csv_header = ['episode_id','reward', 
+                        #   'total_area', 'covered_area', 'covered_area_ratio', 
+                          'distance_to_goal', 
+                            'success', 'spl', 'softspl', 'episode_length', 
+                            # 'euc_distance_to_goal', 'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb',
+                            'pred_iou'
+                            ]
             _csv_writer = csv.writer(f)
             _csv_writer.writerow(csv_header)
 
@@ -1228,8 +1320,8 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
             
             # 1) Get map with all objects
             self.object_maps, agent_locs = self.build_map(batch, self.object_maps, self.grid_map)
-            self.gt_maps = batch['object_map'][:,:,:,0]
-            self.gt_maps[self.gt_maps > 0] = 1.
+            # self.gt_maps = batch['object_map'][:,:,:,0]
+            # self.gt_maps[self.gt_maps > 0] = 1.
                 
             for i in range(self.envs.num_envs):
                 # Dilate object positions on map
@@ -1309,8 +1401,49 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
                                 _goal = stubborn_goal_queues[i].pop(0)
                                 goal_grid_loc = _goal
                                 stubborn_goal_queues[i].append(_goal)
+                        
+                        elif self.config.RL.POLICY.EXPLORATION_STRATEGY == "frontier":
+                            agent_angle = batch[i]['episodic_rotation'].cpu().numpy()
+                            # explore
+                            _explored_map = np.maximum(self.visited[i].cpu().numpy(),self.object_maps[i, :, :, 0].cpu().numpy())
+                            _agent = agent_grid_loc.cpu().numpy()
+                            frontier_pnts, frontier_map = self.findFrontier(_explored_map, 
+                                                            _agent, 
+                                                            agent_angle)
                             
-                        else:
+                            if len(frontier_pnts) > 0:
+                                #goal_grid_loc = torch.tensor(frontier_pnts[0])
+                                frontier_goal_ind = 0
+                                if ("frontier_nearest_select" in self.config.RL.POLICY and
+                                    self.config.RL.POLICY.frontier_nearest_select):
+                                    dist_to_frontiers = np.array([np.linalg.norm(_agent - f, ord=2)
+                                                        for f in frontier_pnts])
+                                    select_dist = (self.config.RL.POLICY.frontier_nearest_select_dist 
+                                                if "frontier_nearest_select_dist" in self.config.RL.POLICY
+                                                else 0) # how far a point should it select
+                                    d = np.where(dist_to_frontiers < select_dist, 
+                                                float('inf'), 
+                                                dist_to_frontiers - select_dist)
+                                    frontier_goal_ind = np.argmin(d)
+                                else:
+                                    frontier_goal_ind = random.randint(0,len(frontier_pnts)-1)
+                                    
+                                # if len(self.config.VIDEO_OPTION) > 0:
+                                #     # Debug (visualization)
+                                #     exp = np.maximum(_explored_map, frontier_map).astype(np.int)
+                                #     exp[frontier_pnts[frontier_goal_ind][0]-1:frontier_pnts[frontier_goal_ind][0]+1, 
+                                #         frontier_pnts[frontier_goal_ind][1]-1:frontier_pnts[frontier_goal_ind][1]+1] = 11
+                                #     exp[_agent[0]-1:_agent[0]+1, _agent[1]-1:_agent[1]+1] = 10
+                                #     epi_id = os.path.basename(current_episodes[i].scene_id) + '_' + current_episodes[i].episode_id
+                                #     Image.fromarray(
+                                #                 multion_maps.OBJECT_MAP_COLORS[exp]
+                                #             ).save(f"{self.config.VIDEO_DIR}/debug_frontier_steps/{epi_id}_{time.time()}.jpg")
+                                    #
+                                    
+                                goal_grid_loc = torch.tensor(frontier_pnts[frontier_goal_ind])
+                                
+                            
+                        elif self.config.RL.POLICY.EXPLORATION_STRATEGY == "random":
                             # Random Exploration Strategy: selecting a random location around the agent
                             explore_radius = self.config.RL.POLICY.EXPLORE_RADIUS
                             
@@ -1319,6 +1452,70 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
                                         random.randint(max(0, agent_grid_loc[0]-explore_radius), min(oracle_map_size[i][0][0], agent_grid_loc[0]+explore_radius)),
                                         random.randint(max(0, agent_grid_loc[1]-explore_radius), min(oracle_map_size[i][0][1], agent_grid_loc[1]+explore_radius))],
                                         device=self.device)
+                            
+                            
+                        # learned Active Neural SLAM
+                        elif self.config.RL.POLICY.EXPLORATION_STRATEGY == "ans_gpolicy":
+                            # Form global map
+                            self.ans_global_map[i, 0, :, :] = self.object_maps[i, :, :, 0]  # obstacle
+                            self.ans_global_map[i, 1, :, :] = torch.maximum(self.object_maps[i, :, :, 0], self.visited[i]) # explored - obstacles+visited
+                            self.ans_global_map[i, 2, :, :] = self.object_maps[i, :, :, 2]
+                            self.ans_global_map[i, 3, :, :] = self.visited[i]
+                            map_transform = nn.MaxPool2d(self.ans_downscaling)(self.ans_global_map[i, :4, :, :])
+                            self.ans_global_map[i, 4:, :, :] = map_transform
+                            
+                            self.ans_global_orientation[i] = ((batch[i]["episodic_compass"] + 180.0) / 5.)
+                            
+                            # Run Global Policy (global_goals = Long-Term Goal)
+                            g_value, g_action, g_action_log_prob, gpolicy_rnn_states[i] = \
+                                g_policy.act(
+                                    self.ans_global_map[i].unsqueeze(0),
+                                    gpolicy_rnn_states[i],
+                                    not_done_masks[i],
+                                    extras=self.ans_global_orientation[i],
+                                    deterministic=False
+                                )
+                            cpu_actions = nn.Sigmoid()(g_action).cpu().numpy()
+                            goal_grid_loc = torch.tensor([[int(action[0] * self.g_local_w), int(action[1] * self.g_local_h)]
+                                            for action in cpu_actions][0])
+                        
+                        # SemExp Global policy (exploration)
+                        elif self.config.RL.POLICY.EXPLORATION_STRATEGY == "sem_exp":
+                            # Form global map
+                            self.semexp_global_map[i, 0, :, :] = self.object_maps[i, :, :, 0]  # obstacle
+                            self.semexp_global_map[i, 1, :, :] = torch.maximum(self.object_maps[i, :, :, 0], self.visited[i]) # explored - obstacles+visited
+                            self.semexp_global_map[i, 2, :, :] = self.object_maps[i, :, :, 2]
+                            self.semexp_global_map[i, 3, :, :] = self.visited[i]
+                            map_transform = nn.MaxPool2d(self.semexp_downscaling)(self.semexp_global_map[i, :4, :, :])
+                            self.semexp_global_map[i, 4:8, :, :] = map_transform
+                            
+                            _semexp_map = torch.zeros(self.object_maps[i, :, :, 1].shape[0], self.object_maps[i, :, :, 1].shape[1], 16)
+                            _indices = self.object_maps[i, :, :, 1].nonzero()
+                            sem_id = self.object_maps[i, :, :, 1][_indices[:,0], _indices[:,1]].type(torch.long)
+                            sem_id = [maps.OBJNAV_CATEGORY_21_TO_SEMEXP_15[s.item()] if s.item() in maps.OBJNAV_CATEGORY_21_TO_SEMEXP_15 else 0 for s in sem_id]
+                            if len(sem_id) > 0:
+                                _semexp_map[_indices[:,0], _indices[:,1], sem_id] = 1
+                            self.semexp_global_map[i, 8:, :, :] = _semexp_map.permute(2,0,1)
+                            
+                            self.semexp_global_orientation[i] = ((batch[i]["episodic_compass"] + 180.0) / 5.)
+                            extras = torch.zeros(1, 2, dtype=torch.long, device=self.device)
+                            extras[0, 0] = self.semexp_global_orientation[i]
+                            goal_cat = next_goal_category[i].item()+1
+                            if goal_cat in maps.OBJNAV_CATEGORY_21_TO_SEMEXP_15:
+                                extras[0, 1] = maps.OBJNAV_CATEGORY_21_TO_SEMEXP_15[goal_cat] # append goal category
+                            
+                            # Run Global Policy (global_goals = Long-Term Goal)
+                            g_value, g_action, g_action_log_prob, gpolicy_rnn_states[i] = \
+                                g_policy.act(
+                                    self.semexp_global_map[i].unsqueeze(0),
+                                    gpolicy_rnn_states[i],
+                                    not_done_masks[i],
+                                    extras=extras,
+                                    deterministic=False
+                                )
+                            cpu_actions = nn.Sigmoid()(g_action).cpu().numpy()
+                            goal_grid_loc = torch.tensor([[int(action[0] * self.g_local_w), int(action[1] * self.g_local_h)]
+                                            for action in cpu_actions][0])
                         
                         is_goal[i] = 0
                         
@@ -1389,22 +1586,22 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
                     deterministic=False,
                 )
 
-                prev_actions.copy_(actions)  # type: ignore
-                
             # Check if the agent is sufficiently close to the goal - then Stop
-            for i in range(self.envs.num_envs):
-                if is_goal[i] == 1:
-                    # get agent location on the map
-                    agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
-                    if len(agent_grid_loc) > 0:
-                        agent_grid_loc = agent_grid_loc[0]
-                    else:
-                        agent_grid_loc = [0, 0]
-                    if ((np.linalg.norm(
-                        goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
-                            ord=2) * self.map_resolution) < 1.0):
-                        actions[i] = 0
-            
+            if self.config.RL.SEM_MAP_POLICY.grid_stop_distance_flag:
+                for i in range(self.envs.num_envs):
+                    if is_goal[i].item() == 1:
+                        # get agent location on the map
+                        agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
+                        if len(agent_grid_loc) > 0:
+                            agent_grid_loc = agent_grid_loc[0]
+                        else:
+                            agent_grid_loc = torch.tensor([0, 0])
+                        if ((np.linalg.norm(
+                            goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
+                                ord=2) * self.map_resolution) < self.config.RL.SEM_MAP_POLICY.grid_stop_distance):
+                            actions[i] = 0
+                            
+            prev_actions.copy_(actions)  # type: ignore
             # NB: Move actions to CPU.  If CUDA tensors are
             # sent in to env.step(), that will create CUDA contexts
             # in the subprocesses.
@@ -1451,14 +1648,14 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
                         "reward": current_episode_reward[i].item()
                     }
                     
-                    total_area = self.gt_maps[i,:,:].sum()
-                    cov_area = self.object_maps[i,:,:,0].sum()
-                    coverage_ratio = cov_area / self.gt_maps[i,:,:].sum()
-                    episode_stats.update({
-                        "total_area": total_area.item(),
-                        "covered_area": cov_area.item(),
-                        "covered_area_ratio": coverage_ratio.item()
-                    })
+                    # total_area = self.gt_maps[i,:,:].sum()
+                    # cov_area = self.object_maps[i,:,:,0].sum()
+                    # coverage_ratio = cov_area / self.gt_maps[i,:,:].sum()
+                    # episode_stats.update({
+                    #     "total_area": total_area.item(),
+                    #     "covered_area": cov_area.item(),
+                    #     "covered_area_ratio": coverage_ratio.item()
+                    # })
                     
                     episode_stats.update(
                         self._extract_scalars_from_info(infos[i])
@@ -1484,10 +1681,10 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
                         if self.config.VIDEO_RENDER_ALL_INFO:
                             _m = self._extract_scalars_from_info(infos[i])
                             _m["reward"] = current_episode_reward[i].item()
-                            _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
+                            _m["next_goal"] = maps.OBJNAV_21_CATEGORY_MAP[next_goal_category[i].item()+1]
                             if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
                                 _m["collision_count"] = collision_threshold_steps[i].item()
-                            _m["coverage_ratio"] = coverage_ratio
+                            # _m["coverage_ratio"] = coverage_ratio
                             frame = overlay_frame(frame, _m)
 
                         rgb_frames[i].append(frame)
@@ -1576,13 +1773,13 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
                         if self.config.VIDEO_RENDER_ALL_INFO:
                             _m = self._extract_scalars_from_info(infos[i])
                             _m["reward"] = current_episode_reward[i].item()
-                            _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
+                            _m["next_goal"] = maps.OBJNAV_21_CATEGORY_MAP[next_goal_category[i].item()+1]
                             if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
                                 _m["collision_count"] = collision_threshold_steps[i].item()
-                            _m["total_area"] = self.gt_maps[i,:,:].sum()
-                            cov_area = self.object_maps[i,:,:,0].sum() #self.visited[i,:,:].sum()
-                            _m["visited_area"] = cov_area
-                            _m["coverage_ratio"] = cov_area / self.gt_maps[i,:,:].sum()
+                            # _m["total_area"] = self.gt_maps[i,:,:].sum()
+                            # cov_area = self.object_maps[i,:,:,0].sum() #self.visited[i,:,:].sum()
+                            # _m["visited_area"] = cov_area
+                            # _m["coverage_ratio"] = cov_area / self.gt_maps[i,:,:].sum()
                             frame = overlay_frame(frame, _m)
 
                         rgb_frames[i].append(frame)
@@ -1611,6 +1808,33 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
                             device=self.device,
                             dtype=torch.long if discrete_actions else torch.float,
                         )
+                        
+                        if self.config.RL.POLICY.EXPLORATION_STRATEGY == "ans_gpolicy":
+                            gpolicy_rnn_states[i] = torch.zeros(
+                                self.actor_critic.num_recurrent_layers,
+                                ppo_cfg.hidden_size,
+                                device=self.device,
+                            )
+                            self.ans_global_map[i] = torch.zeros(
+                                8,
+                                self.map_grid_size,
+                                self.map_grid_size,
+                                device=self.device,
+                                dtype=torch.float,
+                            )
+                        if self.config.RL.POLICY.EXPLORATION_STRATEGY == "sem_exp":
+                            gpolicy_rnn_states[i] = torch.zeros(
+                                self.actor_critic.num_recurrent_layers,
+                                ppo_cfg.hidden_size,
+                                device=self.device,
+                            )
+                            self.semexp_global_map[i] = torch.zeros(
+                                self.ngc,
+                                self.map_grid_size,
+                                self.map_grid_size,
+                                device=self.device,
+                                dtype=torch.float,
+                            )
 
             not_done_masks = not_done_masks.to(device=self.device)
             (
@@ -1730,3 +1954,60 @@ class OraSemChal2021OnTrainer(BaseRLTrainer):
             (grid_x - self.map_center[0]) * self.map_resolution,
             (grid_y - self.map_center[1]) * self.map_resolution,
             ]
+        
+    def findFrontier(self, mat, agent_pos_loc, agent_angle):
+        # Select unexplored area
+        frontier_map = mat == 0
+
+        dilation_size = (self.config.RL.POLICY.frontier_dilation_size 
+                         if "frontier_dilation_size" in self.config.RL.POLICY
+                         else 10)
+
+        # Dilate explored area
+        frontier_map = 1 - skimage.morphology.binary_dilation(
+            1 - frontier_map, skimage.morphology.disk(dilation_size)
+        ).astype(int)
+
+        # Select the frontier
+        frontier_map = (
+            skimage.morphology.binary_dilation(
+                frontier_map, skimage.morphology.disk(1)
+            ).astype(int)
+            - frontier_map
+        )
+
+        # Select the intersection between the frontier and the
+        # direction of the object beyond the maximum depth
+
+        # TODO Make this adaptive
+        # map_size = self.map_grid_size  # 480
+        # hfov = self.config.TASK_CONFIG.SIMULATOR.DEPTH_SENSOR.HFOV #42
+        # frame_width = self.config.TASK_CONFIG.SIMULATOR.DEPTH_SENSOR.WIDTH #480
+
+        # start_x, start_y = agent_pos_loc
+                                
+        # line_length = map_size
+        # # median_col = np.median(np.nonzero(cat_frame)[1])
+        # # frame_angle = np.deg2rad(median_col / frame_width * hfov - hfov / 2)
+        # angle = agent_angle #+ frame_angle
+
+        # end_y = start_y + line_length * math.sin(angle)
+        # end_x = start_x + line_length * math.cos(angle)
+        # direction_map = np.zeros((map_size, map_size))
+        # self.draw_line((start_x, start_y), (end_x, end_y), direction_map, steps=line_length)
+        # direction_frontier_map = frontier_map * direction_map
+        # goal_map = direction_frontier_map
+
+        frontier_locs = np.transpose(np.nonzero(frontier_map))
+
+        return frontier_locs, frontier_map
+    
+    def draw_line(self, start, end, mat, steps=25, w=1):
+        max_r, max_c = mat.shape
+        start = (np.clip(start[0], 0, max_r), np.clip(start[1], 0, max_c))
+        end = (np.clip(end[0], 0, max_r), np.clip(end[1], 0, max_c))
+        for i in range(steps + 1):
+            r = int(np.rint(start[0] + (end[0] - start[0]) * i / steps))
+            c = int(np.rint(start[1] + (end[1] - start[1]) * i / steps))
+            mat[r - w : r + w, c - w : c + w] = 1
+        return mat

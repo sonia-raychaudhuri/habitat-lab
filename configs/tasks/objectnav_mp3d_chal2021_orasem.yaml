@@ -2,8 +2,8 @@ ENVIRONMENT:
   MAX_EPISODE_STEPS: 500
 
 SIMULATOR:
-  TURN_ANGLE: 15 #30
-  TILT_ANGLE: 15 #30
+  # TURN_ANGLE: 15 #30
+  # TILT_ANGLE: 15 #30
   # ACTION_SPACE_CONFIG: "v1"
   AGENT_0:
     SENSORS: ['RGB_SENSOR', 'DEPTH_SENSOR']
@@ -52,17 +52,32 @@ TASK:
   # ["STOP", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "LOOK_DOWN"]
 
   SENSORS: ['OBJECTGOAL_SENSOR', 'POINTGOAL_WITH_GPS_COMPASS_SENSOR', 'GPS_SENSOR', 'COMPASS_SENSOR',
-            'OBJECT_MAP_SENSOR', 'POSITION_SENSOR', 'ROTATION_SENSOR', 'OBJECT_NAV_SEMANTIC_SENSOR']
+            # 'OBJECT_MAP_SENSOR', 
+            'POSITION_SENSOR', 'ROTATION_SENSOR', 
+            'OBJECT_NAV_SEMANTIC_SENSOR'
+            ]
   GOAL_SENSOR_UUID: objectgoal
-  MEASUREMENTS: ['DISTANCE_TO_GOAL', 'SUCCESS', 'SPL', 'SOFT_SPL', 'EPISODE_LENGTH']
+
+  OBJECT_MAP_SENSOR:
+    is_chal_21: True
+    meters_per_pixel: 0.1
+    map_size: 500
+    mask_map: True
+    MAP_CHANNELS: 4
+    object_ind_offset: 1
+    FOV: 79
+
+  MEASUREMENTS: ['DISTANCE_TO_GOAL', 'SUCCESS', 'SPL', 'SOFT_SPL', 'EPISODE_LENGTH'] 
+                  # ,'EUC_DISTANCE_TO_GOAL', 'EUC_DISTANCE_TO_VP', 'PIXEL_COV_OF_GOAL', 'EUC_DISTANCE_TO_GOAL_OBB']
 
   DISTANCE_TO_GOAL:
     DISTANCE_TO: VIEW_POINTS
   SUCCESS:
-    SUCCESS_DISTANCE: 1.0 #0.1
+    SUCCESS_DISTANCE: 0.1
 
 DATASET:
   TYPE: ObjectNav-v1
   SPLIT: train
-  DATA_PATH: "data/datasets/objectnav/hm3d/v1/{split}/{split}.json.gz"
+  DATA_PATH: "data/datasets/objectnav/mp3d/{split}/{split}.json.gz"
   SCENES_DIR: "data/scene_datasets/"
+  # CONTENT_SCENES: ["17DRP5sb8fy"]

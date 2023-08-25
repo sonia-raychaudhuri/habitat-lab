@@ -93,7 +93,7 @@ class Env:
             self._config.defrost()
             self._config.SIMULATOR.SCENE_DATASET = (
                 self.current_episode.scene_dataset_config
-            )
+            ) # comment out for MP3D semantic sensor
             self._config.SIMULATOR.SCENE = self.current_episode.scene_id
             self._config.SIMULATOR.ADDITIONAL_OBJECT_PATHS = (
                 self.current_episode.additional_obj_config_paths

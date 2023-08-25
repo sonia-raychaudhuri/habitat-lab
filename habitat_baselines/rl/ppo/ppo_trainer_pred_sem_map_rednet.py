@@ -1192,7 +1192,7 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
         #   [elevation+slice_range_below, elevation+slice_range_above]
         self.slice_range_below = -1 # Should be 0 or negative
         self.slice_range_above = 10.5 # Should be 0 or positive
-        self.z_bins = [0.05, 3.5]
+        self.z_bins = [0.05, 5.5]
         
         ##
         
@@ -1242,9 +1242,13 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
         os.makedirs(results_dir, exist_ok=True)
         _creation_timestamp = str(time.time())
         with open(os.path.join(results_dir, f"stats_all_{_creation_timestamp}.csv"), 'a') as f:
-            csv_header = ['episode_id','reward', 'total_area', 'covered_area', 'covered_area_ratio', 'distance_to_goal', 
-                            'success', 'spl', 'softspl', 'episode_length', 'euc_distance_to_goal', 
-                            'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb']
+            csv_header = ['episode_id','reward', 
+                        #   'total_area', 'covered_area', 'covered_area_ratio', 
+                          'distance_to_goal', 
+                            'success', 'spl', 'softspl', 'episode_length', 
+                            # 'euc_distance_to_goal', 'euc_distance_to_view_points', 'pixel_cov_of_goal', 'euc_distance_to_goal_obb',
+                            'pred_iou'
+                            ]
             _csv_writer = csv.writer(f)
             _csv_writer.writerow(csv_header)
 
@@ -1279,8 +1283,8 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
             
             # 1) Get map with all objects
             self.object_maps, agent_locs, semantic, _pred_ious = self.build_map(batch, self.object_maps, self.grid_map)
-            self.gt_maps = batch['object_map'][:,:,:,0]
-            self.gt_maps[self.gt_maps > 0] = 1.
+            # self.gt_maps = batch['object_map'][:,:,:,0]
+            # self.gt_maps[self.gt_maps > 0] = 1.
                 
             for i in range(self.envs.num_envs):
                 pred_ious[i].append(_pred_ious[i].item())
@@ -1435,20 +1439,22 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
                     deterministic=False,
                 )
 
-                prev_actions.copy_(actions)  # type: ignore
             # Check if the agent is sufficiently close to the goal - then Stop
-            for i in range(self.envs.num_envs):
-                if is_goal[i] == 1:
-                    # get agent location on the map
-                    agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
-                    if len(agent_grid_loc) > 0:
-                        agent_grid_loc = agent_grid_loc[0]
-                    else:
-                        agent_grid_loc = [0, 0]
-                    if ((np.linalg.norm(
-                        goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
-                            ord=2) * self.map_resolution) < 1.0):
-                        actions[i] = 0
+            if self.config.RL.SEM_MAP_POLICY.grid_stop_distance_flag:
+                for i in range(self.envs.num_envs):
+                    if is_goal[i].item() == 1:
+                        # get agent location on the map
+                        agent_grid_loc = self.object_maps[i, :, :, 2].nonzero(as_tuple=False)
+                        if len(agent_grid_loc) > 0:
+                            agent_grid_loc = agent_grid_loc[0]
+                        else:
+                            agent_grid_loc = torch.tensor([0, 0])
+                        if ((np.linalg.norm(
+                            goal_grid[i].cpu().numpy() - agent_grid_loc.cpu().numpy(), 
+                                ord=2) * self.map_resolution) < self.config.RL.SEM_MAP_POLICY.grid_stop_distance):
+                            actions[i] = 0
+                            
+            prev_actions.copy_(actions)  # type: ignore
             # NB: Move actions to CPU.  If CUDA tensors are
             # sent in to env.step(), that will create CUDA contexts
             # in the subprocesses.
@@ -1495,14 +1501,14 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
                         "reward": current_episode_reward[i].item()
                     }
                     
-                    total_area = self.gt_maps[i,:,:].sum()
-                    cov_area = self.object_maps[i,:,:,0].sum()
-                    coverage_ratio = cov_area / self.gt_maps[i,:,:].sum()
-                    episode_stats.update({
-                        "total_area": total_area.item(),
-                        "covered_area": cov_area.item(),
-                        "covered_area_ratio": coverage_ratio.item()
-                    })
+                    # total_area = self.gt_maps[i,:,:].sum()
+                    # cov_area = self.object_maps[i,:,:,0].sum()
+                    # coverage_ratio = cov_area / self.gt_maps[i,:,:].sum()
+                    # episode_stats.update({
+                    #     "total_area": total_area.item(),
+                    #     "covered_area": cov_area.item(),
+                    #     "covered_area_ratio": coverage_ratio.item()
+                    # })
                     
                     infos[i].update(
                         {"pred_iou": np.array(pred_ious[i]).mean()}
@@ -1535,7 +1541,7 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
                             _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
                             if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
                                 _m["collision_count"] = collision_threshold_steps[i].item()
-                            _m["coverage_ratio"] = coverage_ratio
+                            # _m["coverage_ratio"] = coverage_ratio
                             frame = overlay_frame(frame, _m)
 
                         rgb_frames[i].append(frame)
@@ -1629,10 +1635,10 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
                             _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
                             if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
                                 _m["collision_count"] = collision_threshold_steps[i].item()
-                            _m["total_area"] = self.gt_maps[i,:,:].sum()
-                            cov_area = self.object_maps[i,:,:,0].sum() #self.visited[i,:,:].sum()
-                            _m["visited_area"] = cov_area
-                            _m["coverage_ratio"] = cov_area / self.gt_maps[i,:,:].sum()
+                            # _m["total_area"] = self.gt_maps[i,:,:].sum()
+                            # cov_area = self.object_maps[i,:,:,0].sum() #self.visited[i,:,:].sum()
+                            # _m["visited_area"] = cov_area
+                            # _m["coverage_ratio"] = cov_area / self.gt_maps[i,:,:].sum()
                             frame = overlay_frame(frame, _m)
 
                         rgb_frames[i].append(frame)
@@ -1780,7 +1786,7 @@ class PredSemMapRedNetOnTrainer(BaseRLTrainer):
         _agent_locs = self.to_grid(location)
         object_maps[:, :, :, :2] = torch.tensor(grid_map)
         
-        return object_maps, _agent_locs, semantic, pred_ious
+        return object_maps, _agent_locs, semantic.squeeze(-1), pred_ious
     
     def _unproject_to_world(self, depth, location, theta):
         point_cloud = du.get_point_cloud_from_z(depth, self.camera)
