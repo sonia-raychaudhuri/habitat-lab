@@ -75,7 +75,8 @@ If you use the Habitat platform in your research, please cite the [Habitat 1.0](
 1. **pip install habitat-lab stable version**.
 
       ```bash
-      git clone --branch stable https://github.com/facebookresearch/habitat-lab.git
+      ~~git clone --branch stable https://github.com/facebookresearch/habitat-lab.git~~
+      git clone --branch stable git@github.com:sonia-raychaudhuri/habitat-lab.git
       cd habitat-lab
       pip install -e habitat-lab  # install habitat_lab
       ```
