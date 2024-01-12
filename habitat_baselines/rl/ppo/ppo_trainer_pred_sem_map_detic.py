@@ -102,6 +102,25 @@ from detectron2.data import MetadataCatalog
 from detectron2.utils.visualizer import ColorMode, Visualizer
 
 cv2 = try_cv2_import()
+
+# BUILDIN_CLASSIFIER = {
+#     "lvis": Path(__file__).resolve().parent
+#     / "Detic/datasets/metadata/lvis_v1_clip_a+cname.npy",
+#     "objects365": Path(__file__).resolve().parent
+#     / "Detic/datasets/metadata/o365_clip_a+cnamefix.npy",
+#     "openimages": Path(__file__).resolve().parent
+#     / "Detic/datasets/metadata/oid_clip_a+cname.npy",
+#     "coco": Path(__file__).resolve().parent
+#     / "Detic/datasets/metadata/coco_clip_a+cname.npy",
+# }
+
+# BUILDIN_METADATA_PATH = {
+#     "lvis": "lvis_v1_val",
+#     "objects365": "objects365_v2_val",
+#     "openimages": "oid_val_expanded",
+#     "coco": "coco_2017_val",
+# }
+
 def get_clip_embeddings(vocabulary, prompt='a '):
     text_encoder = build_text_encoder(pretrain=True)
     text_encoder.eval()
@@ -1108,13 +1127,11 @@ class PredSemMapDeticOnTrainer(BaseRLTrainer):
         ):
             config.defrost()
             config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
             config.freeze()
 
-        if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
-            config.defrost()
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
-            config.freeze()
+        config.defrost()
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+        config.freeze()
             
         if config.VERBOSE:
             logger.info(f"env config: {config}")
@@ -1874,8 +1891,7 @@ class PredSemMapDeticOnTrainer(BaseRLTrainer):
                             _m = self._extract_scalars_from_info(infos[i])
                             _m["reward"] = current_episode_reward[i].item()
                             _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
-                            if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
-                                _m["collision_count"] = collision_threshold_steps[i].item()
+                            _m["collision_count"] = collision_threshold_steps[i].item()
                             # _m["total_area"] = self.gt_maps[i,:,:].sum().item()
                             # cov_area = self.object_maps[i,:,:,0].sum().item() #self.visited[i,:,:].sum()
                             # _m["visited_area"] = cov_area
@@ -1975,7 +1991,7 @@ class PredSemMapDeticOnTrainer(BaseRLTrainer):
                 else:
                     if len(self.config.VIDEO_OPTION) > 0:
                         frame = observations_to_image(
-                                observation=observations[i], info=infos[i], action=actions[i].cpu().numpy(),
+                                observation=batch[i], info=infos[i], action=actions[i].cpu().numpy(),
                                 object_map=self.object_maps[i], 
                                 predicted_semantic=semantic[i,:,:,0],
                                 #semantic_projections=(self.map > 0), #projection[i], 
@@ -1987,8 +2003,7 @@ class PredSemMapDeticOnTrainer(BaseRLTrainer):
                             _m = self._extract_scalars_from_info(infos[i])
                             _m["reward"] = current_episode_reward[i].item()
                             _m["next_goal"] = maps.OBJNAV_CATEGORY_MAP[next_goal_category[i].item()+1]
-                            if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn":
-                                _m["collision_count"] = collision_threshold_steps[i].item()
+                            _m["collision_count"] = collision_threshold_steps[i].item()
                             # _m["total_area"] = self.gt_maps[i,:,:].sum().item()
                             # cov_area = self.object_maps[i,:,:,0].sum().item() #self.visited[i,:,:].sum()
                             # _m["visited_area"] = cov_area
@@ -2007,19 +2022,16 @@ class PredSemMapDeticOnTrainer(BaseRLTrainer):
 
                         rgb_frames[i].append(frame)
 
-                    if self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn" and infos[i]["collisions"]["is_collision"]:
+                    if infos[i]["collisions"]["is_collision"]:
                         collision_threshold_steps[i] += 1
                     else:
                         collision_threshold_steps[i] = 0
 
                     if ((actions[i].item() == 0 and infos[i]["success"] == 1) or
                             is_goal[i].item() == 0 and (
-                            ((self.config.RL.POLICY.EXPLORATION_STRATEGY == "" or self.config.RL.POLICY.EXPLORATION_STRATEGY == "random") 
-                                and steps_towards_short_term_goal[i].item() >= self.config.RL.POLICY.MAX_STEPS_BEFORE_GOAL_SELECTION) or
-                            (self.config.RL.POLICY.EXPLORATION_STRATEGY == "stubborn" and 
-                                (infos[i]["collisions"]["is_collision"] and
-                                    collision_threshold_steps[i] > self.config.RL.POLICY.collision_threshold) 
-                                or steps_towards_short_term_goal[i].item() >= self.config.RL.POLICY.MAX_STEPS_BEFORE_GOAL_SELECTION))):
+                            (infos[i]["collisions"]["is_collision"] and
+                                    infos[i]["collisions"]["count"] > self.config.RL.POLICY.collision_threshold) 
+                                or steps_towards_short_term_goal[i].item() >= self.config.RL.POLICY.MAX_STEPS_BEFORE_GOAL_SELECTION)):
                         
                         test_recurrent_hidden_states[i] = torch.zeros(
                             self.actor_critic.num_recurrent_layers,
